@@ -143,13 +143,17 @@ log (`/tmp/lginput-hook-lginput2.log`, field `uinput_code`), not the `keyid`. On
 {
   "773":  {"action": "launch", "id": "com.gathin.tvhome"},
   "1086": {"action": "exec", "command": "luna-send -n 1 luna://com.webos.service.tvpower/power/turnOnScreenSaver {}"},
-  "1043": {"action": "launch", "id": "com.webos.app.home"}
+  "1043": {"action": "exec", "command": "touch /tmp/tvhome-lghome; luna-send -n 1 luna://com.webos.applicationManager/launch {\\\"id\\\":\\\"com.webos.app.home\\\"}"}
 }
 ```
 
 Home (773) opens the launcher, the Alexa button (1086) starts the screensaver, and the LG Channels
 button (1043) opens LG's own home, kept for its menus. Launching `com.webos.app.home` is safer than
 a `replace` to the Home code, which inputhook could send through the Home rule again.
+
+Closing an app sends webOS back to LG's home; `boot-home.js` watches the foreground app and opens
+the launcher instead. The LG Channels rule touches `/tmp/tvhome-lghome` first, which tells
+`boot-home.js` to leave LG's home on screen.
 
 ### Undo everything on a rooted TV
 

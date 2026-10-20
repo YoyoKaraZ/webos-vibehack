@@ -8,6 +8,10 @@
  * Covers both a cold boot and waking from Quick Start+ standby, which never reboots. webOS brings
  * back the last input (or app) on its own a moment after waking, so the launcher is opened right
  * away and put back in front for a few seconds.
+ *
+ * It also stands in for LG's home: when an app is closed, webOS goes back to LG's home, so the
+ * launcher is opened instead. A key bound to LG's home can still open it by touching LG_HOME_PASS
+ * just before (see the inputhook keybinds in the README).
  */
 'use strict';
 const { spawn, execFile } = require('child_process');
@@ -17,6 +21,8 @@ const LAUNCHER = 'com.gathin.tvhome';
 const SOURCES = /^com\.webos\.app\.(hdmi\d|livetv|externalinput\.)/;   // leave these on screen
 const SETTLE_MS = 6000;      // webOS brings back the last input or app within this after power-on
 const LAST_FILE = '/home/root/tvhome/last-app';   // what was in front at power-off, across reboots
+const LG_HOME = 'com.webos.app.home';
+const LG_HOME_PASS = '/tmp/tvhome-lghome';        // touched by a key that asks for LG's home on purpose
 
 function log(msg) { console.log(new Date().toISOString() + ' ' + msg); }
 
@@ -138,4 +144,39 @@ function watchPower() {
   });
 }
 
+/** Swaps LG's home for the launcher, unless LG's home was asked for on purpose. */
+function watchForeground() {
+  const p = spawn('luna-send', ['-i', 'luna://com.webos.applicationManager/getForegroundAppInfo', '{"subscribe":true}']);
+  let buf = '', previous = '';
+  p.stdout.on('data', chunk => {
+    buf += chunk;
+    let nl;
+    while ((nl = buf.indexOf('\n')) >= 0) {
+      const line = buf.slice(0, nl).trim();
+      buf = buf.slice(nl + 1);
+      let msg;
+      try { msg = JSON.parse(line); } catch (e) { continue; }
+      if (msg.appId === undefined) continue;
+      if (msg.appId === LG_HOME && previous !== LG_HOME && !busy) {
+        let asked = false;
+        try {
+          asked = Date.now() - fs.statSync(LG_HOME_PASS).mtimeMs < 10000;
+          fs.unlinkSync(LG_HOME_PASS);
+        } catch (e) { /* no pass: not asked for */ }
+        if (asked) {
+          log('LG home opened on purpose');
+        } else {
+          launchLauncher().then(ok => log('LG home after ' + (previous || 'nothing') + (ok ? ', opened the launcher' : ', could not open the launcher')));
+        }
+      }
+      if (msg.appId) previous = msg.appId;
+    }
+  });
+  p.on('close', () => {
+    log('foreground subscription ended, resubscribing');
+    setTimeout(watchForeground, 5000);
+  });
+}
+
 watchPower();
+watchForeground();
