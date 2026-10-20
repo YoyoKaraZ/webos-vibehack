@@ -21,10 +21,19 @@ window.CONFIG = {
 
   // Backgrounds, cycled with the Thème button at the top; the first is the default. `bg` is any CSS
   // background (an image in app/ works too: "url(wallpaper.jpg) center / cover"). `glow` tints the
-  // page in the focused app's colour.
+  // page in the focused app's colour. `blobs` adds soft halos that drift over the background and
+  // fade in and out: colour as "r,g,b", alpha at the centre, centre x/y in % of the screen, diameter
+  // in px, path (1 to 4: the drift-N keyframes in style.css), drift and fade cycles in seconds, and a
+  // start offset so the halos never move in step.
   themes: [
-    { name: 'Aurore', bg: 'radial-gradient(circle at 15% 20%, rgba(40,170,150,0.45) 0%, rgba(40,170,150,0) 45%), ' +
-      'radial-gradient(circle at 85% 30%, rgba(110,70,200,0.5) 0%, rgba(110,70,200,0) 50%), #05060c', glow: false },
+    { name: 'Aurore', bg: '#04050a', glow: false, blobs: [
+      { color: '40,170,150', alpha: 0.6, x: 15, y: 25, size: 900, path: 1, drift: 26, fade: 9, offset: 3 },
+      { color: '110,70,200', alpha: 0.65, x: 80, y: 30, size: 1000, path: 2, drift: 31, fade: 12, offset: 11 },
+      { color: '35,110,190', alpha: 0.55, x: 50, y: 85, size: 850, path: 3, drift: 22, fade: 10, offset: 7 },
+      { color: '180,60,160', alpha: 0.45, x: 65, y: 60, size: 700, path: 4, drift: 28, fade: 14, offset: 17 },
+      { color: '20,150,200', alpha: 0.45, x: 30, y: 75, size: 650, path: 2, drift: 24, fade: 8, offset: 5 },
+      { color: '70,60,200', alpha: 0.5, x: 90, y: 85, size: 750, path: 1, drift: 34, fade: 13, offset: 21 }
+    ] },
     { name: "Couleur de l'app", bg: '#000', glow: true },
     { name: 'Noir', bg: '#000', glow: false },
     { name: 'Graphite', bg: 'radial-gradient(circle at 30% 20%, #3a3a3e 0%, #1c1c1f 45%, #0b0b0c 100%)', glow: false },

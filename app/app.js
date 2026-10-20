@@ -518,7 +518,26 @@
   function applyTheme(i, save) {
     theme = (i + THEMES.length) % THEMES.length;
     var t = THEMES[theme];
-    $('backdrop').style.background = t.bg || '#000';
+    var backdrop = $('backdrop');
+    backdrop.style.background = t.bg || '#000';
+    backdrop.innerHTML = '';
+    (t.blobs || []).forEach(function (b) {
+      // Drawn at half size and scaled up by the animation: the GPU only moves a small texture,
+      // and on a gradient this soft the difference can't be seen.
+      var el = document.createElement('div');
+      el.className = 'blob';
+      el.style.width = el.style.height = (b.size / 2) + 'px';
+      el.style.left = (b.x / 100 * 1920 - b.size / 4) + 'px';
+      el.style.top = (b.y / 100 * 1080 - b.size / 4) + 'px';
+      el.style.background = 'radial-gradient(circle closest-side, rgba(' + b.color + ',' + b.alpha + '), rgba(' +
+        b.color + ',0))';
+      // Two animations at different rates: the drift moves it, the fade lets colours take over
+      // from one another and dark patches open between halos.
+      var delay = -(b.offset || 0) + 's';
+      el.style.animation = 'drift-' + (b.path || 1) + ' ' + (b.drift || 30) + 's ease-in-out ' + delay +
+        ' infinite alternate, fade ' + (b.fade || 10) + 's ease-in-out ' + delay + ' infinite alternate';
+      backdrop.appendChild(el);
+    });
     document.body.classList.toggle('noGlow', !t.glow);
     $('themeLabel').textContent = t.name;
     if (!save) return;
@@ -702,7 +721,10 @@
   }
 
   document.addEventListener('webOSRelaunch', resume);
-  document.addEventListener('visibilitychange', function () { if (!document.hidden) resume(); });
+  document.addEventListener('visibilitychange', function () {
+    document.body.classList.toggle('away', document.hidden);   // pauses the background while an app is in front
+    if (!document.hidden) resume();
+  });
 
   document.documentElement.style.setProperty('--tile-w', TILE_W + 'px');
   document.documentElement.style.setProperty('--tile-h', TILE_H + 'px');

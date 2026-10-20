@@ -22,7 +22,7 @@ changes:
 | Install | `ROOT_SSH=root@<TV>` installs over Homebrew Channel's SSH, with no Developer Mode app |
 | Power-on | [`boot-home.js`](boot-home.js) runs on the TV and opens the launcher at power-on, unless the TV was turned off on an HDMI input or an HDMI device turned it on |
 | Memory | `boot-home.js` stops webOS's background preloading (YouTube, Netflix, Amazon, LG Channels, browser, voice), which kept a few hundred MB of the TV's 1.7 GB busy; apps opened by hand still stay suspended in memory |
-| Themes | A theme button cycles backgrounds defined in `config.js` (Aurore, the default, App colour, Noir, Graphite, Minuit); the choice is kept on the TV |
+| Themes | A theme button cycles backgrounds defined in `config.js` (Aurore, the default, App colour, Noir, Graphite, Minuit); the choice is kept on the TV. Aurore is animated: six coloured halos drift across a near-black background and fade in and out at their own pace, so colours trade places and dark patches come and go. Only transform and opacity animate, on half-size layers, and it pauses while an app is in front |
 | Layout | Five columns by default; tile size follows the column count. The header stays in place and is aligned with the grid; only the grid scrolls |
 | Language | Interface in French, 24-hour clock |
 | Focus | The glass frame that slid between tiles is gone: the focused tile itself lifts, tvOS style (12 % larger, raised, soft shadow, light sheen, a 5° spring tilt toward the direction of travel). Only transform and opacity animate, so it stays smooth on the TV's GPU |
@@ -184,7 +184,7 @@ saved on the TV.
 theme, and the TV remembers the choice.
 
 **Configure** in [`app/config.js`](app/config.js): the starting dock, apps to hide, the Live TV
-app, the number of columns and the themes (any CSS background, or an image placed in `app/`). App ids come from `venv/bin/python sync-apps.py $TV_HOST --list`.
+app, the number of columns and the themes (any CSS background, or an image placed in `app/`, plus optional drifting `blobs`). App ids come from `venv/bin/python sync-apps.py $TV_HOST --list`.
 Changing `dockApps` resets an order arranged on the TV.
 
 ## Cleaning up LG's home
