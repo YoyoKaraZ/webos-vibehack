@@ -29,6 +29,11 @@ const APP_ID = 'com.gathin.tvhome';
 const HUE_FILE = '/home/root/tvhome/hue.json';
 const NANOLEAF_FILE = '/home/root/tvhome/nanoleaf.json';
 const SNAPSHOT_FILE = '/home/root/tvhome/lights-snapshot.json';
+const LOCK_DIR = '/tmp/tvhome-lights.lock';
+// Effect the Nanoleaf get when there is no state to restore, so they are never left frozen in
+// HyperHDR's streaming mode. '' picks the first effect of the panels' own list.
+const NANOLEAF_FALLBACK_EFFECT = '';
+const NANOLEAF_STREAMING = '*ExtControl*';
 
 const https = require('https');
 const http = require('http');
@@ -69,36 +74,48 @@ async function hueLights(hue) {
   return ids;
 }
 
-/** How the lamps are now, before the sync takes them over. */
+/**
+ * How the lamps are now, before the sync takes them over. A lamp still driven by a sync (Hue area
+ * streaming, Nanoleaf in streaming mode) is not a state worth restoring: its previous snapshot
+ * is kept instead.
+ */
 async function snapshot() {
-  const snap = {};
+  const snap = readJson(SNAPSHOT_FILE) || {};
   const hue = readJson(HUE_FILE), nl = readJson(NANOLEAF_FILE);
   if (hue) {
     const h = { 'hue-application-key': hue.key };
-    snap.hue = [];
-    for (const id of await hueLights(hue)) {
-      const l = (await request('https://' + hue.bridge + '/clip/v2/resource/light/' + id, 'GET', h)).data[0];
-      const s = { id: id, on: l.on.on };
-      if (l.dimming) s.brightness = l.dimming.brightness;
-      if (l.color_temperature && l.color_temperature.mirek_valid) s.mirek = l.color_temperature.mirek;
-      else if (l.color) s.xy = l.color.xy;
-      snap.hue.push(s);
-    }
+    const area = (await request('https://' + hue.bridge + '/clip/v2/resource/entertainment_configuration/' + hue.area, 'GET', h)).data[0];
+    if (area.status !== 'active') snap.hue = await hueSnapshot(hue, h);
   }
   if (nl) {
     const base = 'http://' + nl.host + ':16021/api/v1/' + nl.token;
     const st = await request(base + '/state', 'GET', {});
-    snap.nanoleaf = { on: st.on.value, brightness: st.brightness.value, mode: st.colorMode,
-      hue: st.hue.value, sat: st.sat.value, ct: st.ct.value };
-    if (st.colorMode === 'effect') snap.nanoleaf.effect = await request(base + '/effects/select', 'GET', {});
+    const effect = st.colorMode === 'effect' ? await request(base + '/effects/select', 'GET', {}) : null;
+    if (effect !== NANOLEAF_STREAMING) {
+      snap.nanoleaf = { on: st.on.value, brightness: st.brightness.value, mode: st.colorMode,
+        hue: st.hue.value, sat: st.sat.value, ct: st.ct.value };
+      if (effect) snap.nanoleaf.effect = effect;
+    }
   }
   fs.writeFileSync(SNAPSHOT_FILE, JSON.stringify(snap));
 }
 
+async function hueSnapshot(hue, h) {
+  const lights = [];
+  for (const id of await hueLights(hue)) {
+    const l = (await request('https://' + hue.bridge + '/clip/v2/resource/light/' + id, 'GET', h)).data[0];
+    const st = { id: id, on: l.on.on };
+    if (l.dimming) st.brightness = l.dimming.brightness;
+    if (l.color_temperature && l.color_temperature.mirek_valid) st.mirek = l.color_temperature.mirek;
+    else if (l.color) st.xy = l.color.xy;
+    lights.push(st);
+  }
+  return lights;
+}
+
 /** Puts the lamps back as snapshot() found them. */
 async function restore() {
-  const snap = readJson(SNAPSHOT_FILE);
-  if (!snap) return;
+  const snap = readJson(SNAPSHOT_FILE) || {};
   const hue = readJson(HUE_FILE), nl = readJson(NANOLEAF_FILE);
   if (hue && snap.hue) {
     const h = { 'hue-application-key': hue.key, 'Content-Type': 'application/json' };
@@ -109,6 +126,12 @@ async function restore() {
       else if (s.xy) body.color = { xy: s.xy };
       await request('https://' + hue.bridge + '/clip/v2/resource/light/' + s.id, 'PUT', h, body);
     }
+  }
+  if (nl && !snap.nanoleaf) {
+    // Nothing worth restoring: at least take the panels out of streaming mode.
+    const base = 'http://' + nl.host + ':16021/api/v1/' + nl.token;
+    const effect = NANOLEAF_FALLBACK_EFFECT || (await request(base + '/effects/effectsList', 'GET', {}))[0];
+    if (effect) await request(base + '/effects', 'PUT', { 'Content-Type': 'application/json' }, { select: effect });
   }
   if (nl && snap.nanoleaf) {
     const base = 'http://' + nl.host + ':16021/api/v1/' + nl.token, n = snap.nanoleaf;
@@ -232,7 +255,20 @@ async function main(action) {
   console.log(JSON.stringify(state));
 }
 
-main(process.argv[2] || 'status').catch(e => {
+/** One run at a time: key presses in a row would otherwise race on the state files. */
+async function locked(fn) {
+  for (let i = 0; i < 100; i++) {
+    try { fs.mkdirSync(LOCK_DIR); break; }
+    catch (e) {
+      try { if (Date.now() - fs.statSync(LOCK_DIR).mtimeMs > 20000) fs.rmdirSync(LOCK_DIR); } catch (e2) { /* gone */ }
+      await sleep(150);
+    }
+  }
+  try { return await fn(); } finally { try { fs.rmdirSync(LOCK_DIR); } catch (e) { /* already gone */ } }
+}
+
+const action = process.argv[2] || 'status';
+(action === 'status' ? main(action) : locked(() => main(action))).catch(e => {
   console.log(JSON.stringify(Object.assign(load(), { error: e.message })));
   process.exit(1);
 });

@@ -112,6 +112,41 @@ async function stopPreload(why) {
 }
 
 /**
+ * Stopping the preload manager doesn't last (it was seen preloading again minutes later), so
+ * preloads are also caught as they happen: the app manager reports each one as a "preload" life
+ * event, and the app is closed right away. Apps the viewer opens come as "launch" and stay.
+ */
+function watchPreloads() {
+  if (!STOP_PRELOAD) return;
+  const p = spawn('luna-send', ['-i', 'luna://com.webos.applicationManager/getAppLifeEvents', '{"subscribe":true}']);
+  let buf = '';
+  p.stdout.on('data', chunk => {
+    buf += chunk;
+    let nl;
+    while ((nl = buf.indexOf('\n')) >= 0) {
+      const line = buf.slice(0, nl).trim();
+      buf = buf.slice(nl + 1);
+      let msg;
+      try { msg = JSON.parse(line); } catch (e) { continue; }
+      if (!msg.appId || PRELOADED.indexOf(msg.appId) < 0) continue;
+      if (msg.event !== 'preload') {
+        if (['launch', 'splash', 'stop', 'close'].indexOf(msg.event) >= 0) log('life event ' + msg.event + ' ' + msg.appId);
+        continue;
+      }
+      call('luna://com.webos.service.preloadmanager/setPreloadStatus', { status: 'stop' });
+      setTimeout(() => {
+        call('luna://com.webos.applicationManager/closeByAppId', { id: msg.appId })
+          .then(r => log('preload of ' + msg.appId + (r.returnValue ? ' closed' : ' could not be closed')));
+      }, 1500);   // closing in the middle of the preload itself can fail
+    }
+  });
+  p.on('close', () => {
+    log('app life subscription ended, resubscribing');
+    setTimeout(watchPreloads, 5000);
+  });
+}
+
+/**
  * HyperHDR forgets the lights state (on or off, brightness) set by lights.js when it restarts:
  * re-apply it at boot, retrying while HyperHDR starts. Skipped when lights.js isn't installed.
  */
@@ -263,3 +298,4 @@ function watchEnergySaving() {
 watchPower();
 watchForeground();
 watchEnergySaving();
+watchPreloads();
