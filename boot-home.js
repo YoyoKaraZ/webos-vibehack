@@ -50,8 +50,25 @@ async function poweringOff() {
   log('powering off on ' + app);
 }
 
+/**
+ * EU firmware puts energy saving (which dims the picture) back to Auto across reboots: turn it off
+ * again whenever the TV comes on. Set ENERGY_SAVING to '' to leave the TV's own setting alone.
+ */
+const ENERGY_SAVING = 'off';
+async function keepEnergySaving(why) {
+  if (!ENERGY_SAVING) return;
+  const r = await call('luna://com.webos.settingsservice/getSystemSettings',
+    { category: 'picture', keys: ['energySaving'] });
+  const now = r.settings && r.settings.energySaving;
+  if (!now || now === ENERGY_SAVING) return;
+  await call('luna://com.webos.settingsservice/setSystemSettings',
+    { category: 'picture', settings: { energySaving: ENERGY_SAVING } });
+  log(why + ': energy saving was ' + now + ', set to ' + ENERGY_SAVING);
+}
+
 let busy = false;
 async function poweredOn(why, msg) {
+  keepEnergySaving(why);
   if (busy) return;
   busy = true;
   try {
