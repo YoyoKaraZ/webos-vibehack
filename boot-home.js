@@ -57,8 +57,9 @@ async function poweringOff() {
 }
 
 /**
- * EU firmware puts energy saving (which dims the picture) back to Auto across reboots: turn it off
- * again whenever the TV comes on. Set ENERGY_SAVING to '' to leave the TV's own setting alone.
+ * EU firmware puts energy saving (which dims the picture) back to Auto after a reboot and whenever
+ * the picture mode changes: turn it off again each time. Set ENERGY_SAVING to '' to leave the TV's
+ * own setting alone.
  */
 const ENERGY_SAVING = 'off';
 async function keepEnergySaving(why) {
@@ -178,5 +179,30 @@ function watchForeground() {
   });
 }
 
+/** Re-applies ENERGY_SAVING whenever the TV changes it (picture mode switch, reboot). */
+function watchEnergySaving() {
+  if (!ENERGY_SAVING) return;
+  const p = spawn('luna-send', ['-i', 'luna://com.webos.settingsservice/getSystemSettings',
+    JSON.stringify({ category: 'picture', keys: ['energySaving'], subscribe: true })]);
+  let buf = '';
+  p.stdout.on('data', chunk => {
+    buf += chunk;
+    let nl;
+    while ((nl = buf.indexOf('\n')) >= 0) {
+      const line = buf.slice(0, nl).trim();
+      buf = buf.slice(nl + 1);
+      let msg;
+      try { msg = JSON.parse(line); } catch (e) { continue; }
+      const now = msg.settings && msg.settings.energySaving;
+      if (now && now !== ENERGY_SAVING) keepEnergySaving('setting changed');
+    }
+  });
+  p.on('close', () => {
+    log('energy saving subscription ended, resubscribing');
+    setTimeout(watchEnergySaving, 5000);
+  });
+}
+
 watchPower();
 watchForeground();
+watchEnergySaving();

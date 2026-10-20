@@ -128,8 +128,9 @@ Root also replaces the two Developer Mode workarounds:
   When the TV turns off it notes what was on screen (in `/home/root/tvhome/last-app`); when it
   turns on, it opens the launcher right away and keeps it in front for a few seconds while webOS
   restores the last input, unless the TV was turned off on an HDMI input or Live TV, or an HDMI
-  device turned it on (HDMI-CEC). At every power-on it also turns energy saving back off, as EU
-  firmware re-enables it across reboots (set `ENERGY_SAVING` to `''` in the script to keep the TV's
+  device turned it on (HDMI-CEC). It also keeps energy saving off: EU firmware switches it back to
+  Auto after a reboot and on every picture mode change, so the script watches the setting and turns
+  it off again within a second (set `ENERGY_SAVING` to `''` in the script to keep the TV's
   own setting). It starts at boot from
   `/var/lib/webosbrew/init.d/tvhome-boot` and logs to `/tmp/tvhome-boot.log` on the TV.
 
