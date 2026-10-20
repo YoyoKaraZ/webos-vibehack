@@ -3,26 +3,28 @@
  * springs between tiles. A port of the Android launcher in ../../launcher.
  *
  * webOS does not let third-party apps list installed apps, so sync-apps.py writes them into apps.js.
+ * On a TV rooted with Homebrew Channel, the live list replaces that snapshot (fetchLiveApps).
  */
 (function () {
   'use strict';
 
   var COLUMNS = Math.max(1, CONFIG.columns || 4);
-  var TILE_W = 360, TILE_H = 202;
   var CELL_W = (1920 - 2 * 112) / COLUMNS;
-  var ROW_PITCH = 292;
+  var TILE_W = Math.min(360, Math.floor(CELL_W - 40));   // 360 x 202 up to 4 columns, smaller beyond
+  var TILE_H = Math.round(TILE_W * 202 / 360);
+  var ROW_PITCH = TILE_H + 90;
   var DOCK_TOP = 708;           // tile top of the dock row: next row peeks in at the bottom
   var DOCK_GAP = 36;            // extra space below the dock
   var FOCUS_SCALE = 1.1;
   var GLASS_PAD = 12;           // room for the glass glow around the scaled tile
-  var VIEW_TOP = 80, VIEW_BOTTOM = 1060;    // area grid rows scroll into (the header hides below the dock)
+  var VIEW_TOP, VIEW_BOTTOM = 1060;         // area grid rows scroll into: below the header, set at start
 
   var KEY = { LEFT: 37, UP: 38, RIGHT: 39, DOWN: 40, OK: 13, BACK: 461, ESC: 27 };
 
-  var GREETINGS = [[5, 'Good night'], [12, 'Good morning'], [17, 'Good afternoon'], [22, 'Good evening'], [24, 'Good night']];
-  var DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-  var MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September',
-    'October', 'November', 'December'];
+  var GREETINGS = [[5, 'Bonne nuit'], [12, 'Bonjour'], [17, 'Bon après-midi'], [22, 'Bonsoir'], [24, 'Bonne nuit']];
+  var DAYS = ['dimanche', 'lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi'];
+  var MONTHS = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre',
+    'octobre', 'novembre', 'décembre'];
 
   var ICON_INPUT = 'M18,7V4c0,-1.1 -0.9,-2 -2,-2H8C6.9,2 6,2.9 6,4v3H5v6l3,6v3h8v-3l3,-6V7H18zM8,4h8v3h-2V5h-1v2h-2V5h-1v2H8V4z';
   var ICON_LIVETV = 'M21,6h-7.59l3.29,-3.29L16,2l-4,4l-4,-4l-0.71,0.71L10.59,6H3c-1.1,0 -2,0.89 -2,2v12c0,1.1 0.9,2 2,2h18c1.1,0 2,-0.89 2,-2V8C23,6.89 22.1,6 21,6zM21,20H3V8h18V20zM9,10v8l7,-4L9,10z';
@@ -30,7 +32,7 @@
   var $ = function (id) { return document.getElementById(id); };
   var stage = $('stage'), tilesEl = $('tiles'), glass = $('glass'), hero = $('hero');
   var ambients = [$('ambientA'), $('ambientB')], ambientFront = 0, ambientColor = null;
-  var pills = [$('btnInputs'), $('btnWifi'), $('btnSettings')];
+  var pills = [$('btnInputs'), $('btnWifi'), $('btnSettings'), $('btnTheme')];
   var panel = $('inputsPanel');
 
   var items = [];               // {app, el, color}
@@ -61,7 +63,7 @@
 
   function launch(id, title, params) {
     luna('luna://com.webos.applicationManager/launch', { id: id, params: params || {} }, function (res) {
-      if (res.returnValue === false) toast("Can't open " + (title || id));
+      if (res.returnValue === false) toast("Impossible d'ouvrir " + (title || id));
     });
   }
 
@@ -103,6 +105,69 @@
     return dock.concat(rest);
   }
 
+  /**
+   * On a TV rooted with Homebrew Channel, its root service can read the real app list, so apps
+   * installed after the last sync (homebrew ones included) show up. Without it, apps.js stays.
+   */
+  /** A luna call made as root through Homebrew Channel; cb only runs when it worked. */
+  function rootLuna(uri, cb) {
+    var cmd = 'luna-send -n 1 ' + uri + " '{}'";
+    luna('luna://org.webosbrew.hbchannel.service/exec', { command: cmd }, function (res) {
+      var out = res.stdoutString || '', reply;
+      try { reply = JSON.parse(out.slice(out.indexOf('{'))); } catch (e) { /* not rooted, or refused */ }
+      if (res.returnValue && reply && reply.returnValue !== false) cb(reply);
+    });
+  }
+
+  /**
+   * Icons of apps installed after the last sync live in their own app folders, which a web app
+   * can't read: read them as root instead and show them as data URLs.
+   */
+  var rootIcons = {};
+  function loadRootIcon(path, img) {
+    if (rootIcons[path]) { img.src = rootIcons[path]; return; }
+    var type = /\.jpe?g$/i.test(path) ? 'image/jpeg' : 'image/png';
+    luna('luna://org.webosbrew.hbchannel.service/exec', { command: "cat '" + path + "'" }, function (res) {
+      if (!res.returnValue || !res.stdoutBytes) return;
+      img.src = rootIcons[path] = 'data:' + type + ';base64,' + res.stdoutBytes;
+    });
+  }
+
+  function fetchLiveApps(cb) {
+    rootLuna('luna://com.webos.applicationManager/listLaunchPoints', function (reply) {
+      var points = reply.launchPoints;
+      if (!points) return;
+
+      var synced = {};
+      ((window.TV_APPS && TV_APPS.apps) || []).forEach(function (a) { synced[a.id] = a; });
+      cb(points.filter(function (p) { return !p.hidden; }).map(function (p) {
+        var icon = p.largeIcon || p.icon || '';
+        return {
+          id: p.id,
+          title: p.title,
+          icon: synced[p.id] ? synced[p.id].icon : icon,   // keep the synced icon: it is the store banner
+          iconColor: p.iconColor || p.bgColor || ''
+        };
+      }));
+    });
+  }
+
+  function appsKey(apps) {
+    return apps.map(function (a) { return a.id + '|' + a.title; }).sort().join('\n');
+  }
+
+  /** Swaps in the live app list and rebuilds the tiles when it differs from what is shown. */
+  function refreshApps() {
+    fetchLiveApps(function (apps) {
+      if (editing || appsKey(apps) === appsKey((window.TV_APPS && TV_APPS.apps) || [])) return;
+      window.TV_APPS = window.TV_APPS || {};
+      TV_APPS.apps = apps;
+      build();
+      animateIn();
+      if (zone === 'grid' || zone === 'none') focusTile(focused);
+    });
+  }
+
   var ORDER_KEY = 'tvhome.order';
 
   function loadOrder() {
@@ -137,7 +202,8 @@
       var img = document.createElement('img');
       var item = { app: app, el: el, card: card, color: null };
       img.onload = function () { paintTile(item, img); };
-      img.src = app.icon;
+      if (app.icon.charAt(0) === '/') loadRootIcon(app.icon, img);
+      else img.src = app.icon;
       card.appendChild(img);
       el.appendChild(card);
       var name = document.createElement('div');
@@ -305,10 +371,6 @@
       if (top - offset - 24 < VIEW_TOP) offset = top - 24 - VIEW_TOP;
     }
     stage.style.transform = 'translateY(' + (-offset) + 'px)';
-    // Keep the header until the content (the dock band is topmost) would run into it.
-    var header = document.querySelector('header');
-    var headerBottom = header.offsetTop + header.offsetHeight;   // layout box: ignores the hide slide
-    document.body.classList.toggle('scrolled', DOCK_TOP - 28 - offset < headerBottom + 24);
 
     var w = TILE_W * FOCUS_SCALE + 2 * GLASS_PAD, h = TILE_H * FOCUS_SCALE + 2 * GLASS_PAD;
     var x = tileLeft(i) + TILE_W / 2 - w / 2, y = top + TILE_H / 2 - h / 2;
@@ -338,6 +400,7 @@
     var label = item.app.title;
     hero.style.top = (DOCK_TOP - 28 - 52 - 96) + 'px';
     if (!heroShown) {
+      clearTimeout(hero.swap);
       hero.textContent = label;
       hero.style.transform = 'none';
       hero.style.opacity = '1';
@@ -360,6 +423,7 @@
   }
 
   function hideHero() {
+    clearTimeout(hero.swap);   // a name swap still pending would show it again
     if (!heroShown) return;
     heroShown = false;
     hero.style.opacity = '0';
@@ -381,7 +445,6 @@
 
   function focusPill(i) {
     setZone('top');
-    document.body.classList.remove('scrolled');
     pills[pillFocus].classList.remove('focused');
     pillFocus = Math.max(0, Math.min(i, pills.length - 1));
     pills[pillFocus].classList.add('focused');
@@ -416,8 +479,7 @@
       if (h < GREETINGS[k][0]) { $('greeting').textContent = GREETINGS[k][1]; break; }
     }
     var m = now.getMinutes();
-    $('clock').textContent = ((h % 12) || 12) + ':' + (m < 10 ? '0' : '') + m;
-    $('ampm').textContent = h < 12 ? 'am' : 'pm';
+    $('clock').textContent = (h < 10 ? '0' : '') + h + ':' + (m < 10 ? '0' : '') + m;
     $('date').textContent = DAYS[now.getDay()] + '  ' + now.getDate() + ' ' + MONTHS[now.getMonth()];
   }
 
@@ -428,29 +490,69 @@
       var text = 'Wi-Fi';
       if (res.wired && res.wired.state === 'connected') text = 'Ethernet';
       else if (res.wifi && res.wifi.state === 'connected') text = res.wifi.ssid || 'Wi-Fi';
-      else if (res.isInternetConnectionAvailable === false) text = 'Offline';
+      else if (res.isInternetConnectionAvailable === false) text = 'Hors ligne';
       $('wifiLabel').textContent = text;
     });
   }
 
   function activatePill(i) {
     if (i === 0) showInputs();
-    else if (i === 1) launch('com.palm.app.settings', 'Settings', { target: 'network' });
-    else launch('com.palm.app.settings', 'Settings');
+    else if (i === 1) launch('com.palm.app.settings', 'Paramètres', { target: 'network' });
+    else if (i === 2) launch('com.palm.app.settings', 'Paramètres');
+    else applyTheme(theme + 1, true);
+  }
+
+  // ---- themes --------------------------------------------------------------------------------
+
+  var THEMES = CONFIG.themes && CONFIG.themes.length ? CONFIG.themes : [{ name: "Couleur de l'app", bg: '#000', glow: true }];
+  var THEME_KEY = 'tvhome.theme';
+  var theme = 0;
+
+  function loadTheme() {
+    try {
+      var name = localStorage.getItem(THEME_KEY);
+      for (var k = 0; k < THEMES.length; k++) if (THEMES[k].name === name) return k;
+    } catch (e) { /* storage unavailable: start on the default */ }
+    return 0;
+  }
+
+  /** Shows theme i (wrapping around); `save` remembers it for the next start. */
+  function applyTheme(i, save) {
+    theme = (i + THEMES.length) % THEMES.length;
+    var t = THEMES[theme];
+    $('backdrop').style.background = t.bg || '#000';
+    document.body.classList.toggle('noGlow', !t.glow);
+    $('themeLabel').textContent = t.name;
+    if (!save) return;
+    try { localStorage.setItem(THEME_KEY, t.name); } catch (e) { /* lasts until the app restarts */ }
   }
 
   // ---- inputs dropdown -----------------------------------------------------------------------
 
+  var liveInputs = null;   // on a rooted TV: only the inputs with something plugged in
+
+  function refreshInputs() {
+    rootLuna('luna://com.webos.service.eim/getAllInputStatus', function (reply) {
+      if (!reply.devices) return;
+      liveInputs = reply.devices.filter(function (d) {
+        // The sound bar on the eARC port is plugged in too, but has no picture (CEC audio system).
+        var audioOnly = (d.subList || []).some(function (s) { return s.cecpDevType === 5; });
+        return d.hdmiPlugIn !== false && !audioOnly;
+      }).map(function (d) { return { appId: d.appId, label: d.label }; });
+    });
+  }
+
   function showInputs() {
     panel.innerHTML = '';
     inputRows = [];
-    var inputs = (window.TV_APPS && TV_APPS.inputs) || [];
+    var inputs = liveInputs || (window.TV_APPS && TV_APPS.inputs) || [];
+    refreshInputs();   // for next time: something may have been plugged in meanwhile
     inputs.forEach(function (inp) { addInputRow(ICON_INPUT, inp.label, inp.appId); });
     if (CONFIG.liveTvApp) {
       if (inputRows.length) panel.appendChild(Object.assign(document.createElement('div'), { className: 'separator' }));
-      addInputRow(ICON_LIVETV, 'Live TV', CONFIG.liveTvApp);
+      addInputRow(ICON_LIVETV, 'TV en direct', CONFIG.liveTvApp);
     }
-    if (!inputRows.length) { toast('No inputs found'); return; }
+    if (!inputRows.length) { toast('Aucune entrée active'); return; }
 
     // Hang right below the Inputs pill, at least as wide as it.
     var r = pills[0].getBoundingClientRect();
@@ -498,7 +600,7 @@
     editing = { item: it, snapshot: items.slice() };
     it.el.classList.add('moving');
     document.body.classList.add('editing');
-    toast('Arrows to move  ·  OK to place  ·  Back to cancel');
+    toast('Flèches pour déplacer  ·  OK pour placer  ·  Retour pour annuler');
   }
 
   function moveTo(to) {
@@ -597,11 +699,24 @@
     zone = 'none';
     animateIn();
     focusTile(focused);
+    refreshApps();
+    refreshInputs();
   }
 
   document.addEventListener('webOSRelaunch', resume);
   document.addEventListener('visibilitychange', function () { if (!document.hidden) resume(); });
 
+  document.documentElement.style.setProperty('--tile-w', TILE_W + 'px');
+  document.documentElement.style.setProperty('--tile-h', TILE_H + 'px');
+
+  // The header stays put: the grid scrolls in the band below it, in the same page coordinates.
+  var header = document.querySelector('header');
+  var headerBottom = header.offsetTop + header.offsetHeight + 16;
+  $('viewport').style.top = headerBottom + 'px';
+  stage.style.top = -headerBottom + 'px';
+  VIEW_TOP = headerBottom + 8;
+
+  applyTheme(loadTheme(), false);
   build();
   updateClock();
   setInterval(updateClock, 10000);
@@ -609,4 +724,6 @@
   animateIn();
   zone = 'none';
   focusTile(0);
+  refreshApps();
+  refreshInputs();
 })();

@@ -5,7 +5,29 @@ An Apple TV-style home screen for LG TVs. It's a webOS port of the launcher from
 
 ![The launcher running on an LG OLED C6](docs/screenshot.jpg)
 
-Tested on an LG OLED C6 (OLED55C6XLA, webOS 26, firmware 43.21.79).
+Tested on an LG OLED C6 (OLED55C6XLA, webOS 26, firmware 43.21.79) and, for this fork, on a rooted
+LG OLED B5 (OLED55B56LA, webOS 10.3.2, firmware 33.31.75).
+
+## About this fork
+
+This is [YoyoKaraZ/webos-vibehack](https://github.com/YoyoKaraZ/webos-vibehack), a fork of
+[OmkarK97/webos-vibehack](https://github.com/OmkarK97/webos-vibehack). It keeps the Developer Mode
+setup working and adds what a TV rooted with Homebrew Channel makes possible, plus a few interface
+changes:
+
+| Area | Change |
+|---|---|
+| App list | Read live on the TV through Homebrew Channel's root service, so apps installed later (homebrew ones included) appear without a resync. Icons of those apps are read as root too, since a web app can't open files in another app's folder |
+| Inputs menu | Only the inputs with a device plugged in, read live; an audio-only device on the eARC port (a sound bar) is left out. Live TV is off by default (`liveTvApp: ''`) |
+| Install | `ROOT_SSH=root@<TV>` installs over Homebrew Channel's SSH, with no Developer Mode app |
+| Power-on | [`boot-home.js`](boot-home.js) runs on the TV and opens the launcher at power-on, unless the TV was turned off on an HDMI input or an HDMI device turned it on |
+| Themes | A theme button cycles backgrounds defined in `config.js` (Aurore, the default, App colour, Noir, Graphite, Minuit); the choice is kept on the TV |
+| Layout | Five columns by default; tile size follows the column count. The header stays in place and is aligned with the grid; only the grid scrolls |
+| Language | Interface in French, 24-hour clock |
+| Fix | The dock app name no longer stays on screen when scrolling right after switching apps |
+
+The Home button itself is remapped outside this repo, with the homebrew tool inputhook: see
+[The Home button on a rooted TV](#the-home-button-on-a-rooted-tv).
 
 ## What's different from Android
 
@@ -47,7 +69,7 @@ npx -y -p @webos-tools/cli ares-setup-device -m lgtv -i "{'privatekey':'lgtv_web
 **3. Install**
 
 ```bash
-git clone https://github.com/OmkarK97/webos-vibehack.git
+git clone https://github.com/YoyoKaraZ/webos-vibehack.git
 cd webos-vibehack
 python3 -m venv venv && venv/bin/pip install websockets
 TV_HOST=192.168.1.50 ./install.sh
@@ -86,18 +108,72 @@ Local Network), or the watcher logs "No route to host". The log is at
 home; for every time, run `python3 home-watch.py 192.168.1.50` on something that's always on, such
 as a Raspberry Pi.
 
+## Rooted TVs
+
+On a TV rooted with [Homebrew Channel](https://github.com/webosbrew/webos-homebrew-channel), the
+launcher asks Homebrew Channel's root service (`org.webosbrew.hbchannel.service/exec`) for the real
+app list and the plugged-in inputs each time it opens, so apps installed later (homebrew apps
+included) show up without running `install.sh` again. Apps already synced keep their store banner;
+new ones use the icon the TV has, read as root. Without root, the launcher shows the synced list as
+before.
+
+Root also replaces the two Developer Mode workarounds:
+
+- **Install** over Homebrew Channel's root SSH (turn on SSH in its settings), with no Developer
+  Mode app and no session to extend:
+  `TV_HOST=192.168.1.50 ROOT_SSH=root@192.168.1.50 ./install.sh`
+- **Home button**: map Home to `com.gathin.tvhome` with inputhook instead of running
+  `home-watch.py`, see below.
+- **Power-on**: the root install also adds [`boot-home.js`](boot-home.js), which runs on the TV.
+  When the TV turns off it notes what was on screen (in `/home/root/tvhome/last-app`); when it
+  turns on, it opens the launcher right away and keeps it in front for a few seconds while webOS
+  restores the last input, unless the TV was turned off on an HDMI input or Live TV, or an HDMI
+  device turned it on (HDMI-CEC). It starts at boot from
+  `/var/lib/webosbrew/init.d/tvhome-boot` and logs to `/tmp/tvhome-boot.log` on the TV.
+
+### The Home button on a rooted TV
+
+[inputhook](https://github.com/Simon34545/lginputhook) (in Homebrew Channel) remaps remote buttons
+from `/home/root/.config/lginputhook/keybinds.json`. Its keys are the **uinput codes** shown in its
+log (`/tmp/lginput-hook-lginput2.log`, field `uinput_code`), not the `keyid`. On an LG MR25GA remote:
+
+```json
+{
+  "773":  {"action": "launch", "id": "com.gathin.tvhome"},
+  "1086": {"action": "launch", "id": "com.webos.app.home"}
+}
+```
+
+Home (773) opens the launcher; the Alexa button (1086) opens LG's own home, kept for its menus.
+Launching `com.webos.app.home` is safer than a `replace` to the Home code, which inputhook could
+send through the Home rule again.
+
+### Undo everything on a rooted TV
+
+```bash
+ssh root@<TV>
+pkill -f '[b]oot-home.js'
+rm -rf /var/lib/webosbrew/init.d/tvhome-boot /home/root/tvhome
+echo '{}' > /home/root/.config/lginputhook/keybinds.json
+luna-send -n 1 luna://com.webos.appInstallService/dev/remove '{"id":"com.gathin.tvhome"}'
+```
+
 ## Using it
 
-Same as the [Android launcher](https://github.com/Gathin23/tv-vibehack#the-launcher): a dock of four apps with the focused app's name above it and a glow
-in its colour, the rest of your apps in a grid below, and Inputs (HDMI ports and Live TV), Wi-Fi
-and Settings at the top. The header slides away when the grid scrolls into it.
+Same as the [Android launcher](https://github.com/Gathin23/tv-vibehack#the-launcher): a dock of
+one row of apps with the focused app's name above it and a glow in its colour, the rest of your
+apps in a grid below, and Inputs, Wi-Fi, Settings and the theme button at the top. The header stays in place; the grid scrolls below it. The interface is in
+French.
 
 **Rearrange tiles on the TV**: hold **OK** on a tile until it wiggles, move it with the arrows
 (into the top row puts it in the dock), then **OK** to place it or **Back** to cancel. The order is
 saved on the TV.
 
+**Change the background** with the theme button at the top (it shows the current theme's name): each press switches to the next
+theme, and the TV remembers the choice.
+
 **Configure** in [`app/config.js`](app/config.js): the starting dock, apps to hide, the Live TV
-app and the number of columns. App ids come from `venv/bin/python sync-apps.py $TV_HOST --list`.
+app, the number of columns and the themes (any CSS background, or an image placed in `app/`). App ids come from `venv/bin/python sync-apps.py $TV_HOST --list`.
 Changing `dockApps` resets an order arranged on the TV.
 
 ## Cleaning up LG's home
@@ -130,6 +206,7 @@ For when you do land on it. Names vary a little by webOS version:
 | [`sync-apps.py`](sync-apps.py) | Reads apps, icons and HDMI inputs from the TV into `app/apps.js` and `app/icons/` |
 | [`home-watch.py`](home-watch.py) | Sends the Home button to the launcher |
 | [`home-watch-mac.sh`](home-watch-mac.sh) | Runs the watcher as a macOS background service |
+| [`boot-home.js`](boot-home.js) | On a rooted TV: opens the launcher at power-on |
 | [`lgtv.py`](lgtv.py) | Pairs with and talks to the TV's remote-control service |
 | [`assets/icon.jpg`](assets/icon.jpg) | The app icon, resized to PNG by `install.sh` |
 
