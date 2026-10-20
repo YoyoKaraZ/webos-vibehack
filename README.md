@@ -21,6 +21,7 @@ changes:
 | Inputs menu | Only the inputs with a device plugged in, read live; an audio-only device on the eARC port (a sound bar) is left out. Live TV is off by default (`liveTvApp: ''`) |
 | Install | `ROOT_SSH=root@<TV>` installs over Homebrew Channel's SSH, with no Developer Mode app |
 | Power-on | [`boot-home.js`](boot-home.js) runs on the TV and opens the launcher at power-on, unless the TV was turned off on an HDMI input or an HDMI device turned it on |
+| Memory | `boot-home.js` stops webOS's background preloading (YouTube, Netflix, Amazon, LG Channels, browser, voice), which kept a few hundred MB of the TV's 1.7 GB busy; apps opened by hand still stay suspended in memory |
 | Themes | A theme button cycles backgrounds defined in `config.js` (Aurore, the default, App colour, Noir, Graphite, Minuit); the choice is kept on the TV |
 | Layout | Five columns by default; tile size follows the column count. The header stays in place and is aligned with the grid; only the grid scrolls |
 | Language | Interface in French, 24-hour clock |

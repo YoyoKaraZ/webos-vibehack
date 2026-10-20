@@ -84,9 +84,37 @@ async function keepEnergySaving(why) {
   log(why + ': energy saving was ' + now + ', set to ' + ENERGY_SAVING);
 }
 
+/**
+ * webOS preloads apps in the background (YouTube, Netflix, LG Channels...) so they open faster,
+ * at the cost of a few hundred MB of the TV's 1.7 GB, which makes everything else stutter. Its
+ * per-app policy resets on wake, so preloading is stopped altogether: the setting lasts until the
+ * next reboot. At boot, apps preloaded before this ran are closed too; nothing the viewer opened
+ * is running yet then. Apps opened by hand still stay suspended in memory as usual.
+ * Set STOP_PRELOAD to false to leave webOS's preloading alone.
+ */
+const STOP_PRELOAD = true;
+const PRELOADED = ['youtube.leanback.v4', 'netflix', 'amazon', 'com.webos.app.lgchannels',
+  'com.webos.app.browser', 'com.webos.app.voice'];
+async function stopPreload(why) {
+  if (!STOP_PRELOAD) return;
+  await call('luna://com.webos.service.preloadmanager/setPreloadStatus', { status: 'stop' });
+  if (why !== 'boot') return;
+  const running = ((await call('luna://com.webos.applicationManager/running')).running || []).map(a => a.id);
+  const front = await foreground();
+  const closed = [];
+  for (const id of PRELOADED) {
+    if (running.indexOf(id) >= 0 && id !== front) {
+      await call('luna://com.webos.applicationManager/closeByAppId', { id: id });
+      closed.push(id);
+    }
+  }
+  log(why + ': preloading stopped' + (closed.length ? ', closed ' + closed.join(', ') : ''));
+}
+
 let busy = false;
 async function poweredOn(why, msg) {
   keepEnergySaving(why);
+  if (why !== 'boot') stopPreload(why);   // at boot it already ran when the script started
   if (busy) return;
   busy = true;
   try {
@@ -138,6 +166,7 @@ function watchPower() {
       if (!started) {
         started = true;
         log('started, power state ' + msg.state);
+        stopPreload('boot');
         if (msg.state === 'Active') poweredOn('boot', msg);
       } else if (state === null) {
         // resubscribed: just pick up the current state
