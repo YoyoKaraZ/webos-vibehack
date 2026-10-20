@@ -36,6 +36,17 @@ function call(uri, params) {
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
+/**
+ * True if appId is an input with something to watch: not one whose device is an audio system on
+ * HDMI-CEC (a sound bar on the eARC port), which webOS can switch to while the TV turns off.
+ */
+async function isPictureSource(appId) {
+  if (!SOURCES.test(appId)) return false;
+  const r = await call('luna://com.webos.service.eim/getAllInputStatus');
+  const dev = (r.devices || []).find(d => d.appId === appId);
+  return !(dev && (dev.subList || []).some(s => s.cecpDevType === 5));
+}
+
 function foreground() {
   return call('luna://com.webos.applicationManager/getForegroundAppInfo').then(r => r.appId || '');
 }
@@ -79,7 +90,7 @@ async function poweredOn(why, msg) {
   if (busy) return;
   busy = true;
   try {
-    if (SOURCES.test(lastApp)) {
+    if (await isPictureSource(lastApp)) {
       log(why + ': turned off on ' + lastApp + ', leaving the input');
       return;
     }
@@ -93,6 +104,7 @@ async function poweredOn(why, msg) {
     let launched = 0;
     while (launched ? Date.now() - launched < SETTLE_MS : Date.now() - start < 40000) {
       const app = await foreground();
+      if (app === LAUNCHER && !launched) launched = Date.now();   // already up: just hold it briefly
       if (app !== LAUNCHER && (await launchLauncher())) {
         log(why + ': opened the launcher' + (app ? ' over ' + app : ''));
         if (!launched) launched = Date.now();

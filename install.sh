@@ -42,12 +42,14 @@ if [ -n "${ROOT_SSH:-}" ]; then
     grep -q '\"installed\"' /tmp/tvhome.log || { cat /tmp/tvhome.log; exit 1; }
     luna-send -n 1 luna://com.webos.applicationManager/launch '{\"id\":\"$APP_ID\"}' >/dev/null"
 
-  # Open the launcher at power-on (see boot-home.js), started at boot by Homebrew Channel.
+  # Open the launcher at power-on (see boot-home.js), started at boot by Homebrew Channel. setsid
+  # keeps it apart from whatever session starts it.
   ssh "$ROOT_SSH" 'mkdir -p /home/root/tvhome && cat > /home/root/tvhome/boot-home.js' < boot-home.js
   ssh "$ROOT_SSH" "
-    printf '#!/bin/sh\nnode /home/root/tvhome/boot-home.js >> /tmp/tvhome-boot.log 2>&1 &\n' > /var/lib/webosbrew/init.d/tvhome-boot
-    chmod 755 /var/lib/webosbrew/init.d/tvhome-boot
-    pkill -f '[b]oot-home.js'; /var/lib/webosbrew/init.d/tvhome-boot"
+    printf '#!/bin/sh\nsetsid node /home/root/tvhome/boot-home.js >> /tmp/tvhome-boot.log 2>&1 < /dev/null &\n' > /var/lib/webosbrew/init.d/tvhome-boot
+    chmod 755 /var/lib/webosbrew/init.d/tvhome-boot"
+  # Separate session: pkill -f matches command lines, and the one above contains the script's name.
+  ssh "$ROOT_SSH" "pkill -f '[b]oot-home.js'; /var/lib/webosbrew/init.d/tvhome-boot"
 else
   ares install -d "$DEVICE" build/${APP_ID}_*.ipk
   ares launch -d "$DEVICE" "$APP_ID"
