@@ -111,6 +111,21 @@ async function stopPreload(why) {
   log(why + ': preloading stopped' + (closed.length ? ', closed ' + closed.join(', ') : ''));
 }
 
+/**
+ * HyperHDR forgets the lights state (on or off, brightness) set by lights.js when it restarts:
+ * re-apply it at boot, retrying while HyperHDR starts. Skipped when lights.js isn't installed.
+ */
+const LIGHTS = '/home/root/tvhome/lights.js';
+async function restoreLights() {
+  if (!fs.existsSync(LIGHTS)) return;
+  for (let i = 0; i < 12; i++) {
+    const ok = await new Promise(r => execFile('node', [LIGHTS, 'apply'], err => r(!err)));
+    if (ok) return log('boot: lights state restored');
+    await sleep(10000);
+  }
+  log('boot: could not restore the lights state, HyperHDR not answering');
+}
+
 let busy = false;
 async function poweredOn(why, msg) {
   keepEnergySaving(why);
@@ -167,6 +182,7 @@ function watchPower() {
         started = true;
         log('started, power state ' + msg.state);
         stopPreload('boot');
+        restoreLights();
         if (msg.state === 'Active') poweredOn('boot', msg);
       } else if (state === null) {
         // resubscribed: just pick up the current state

@@ -172,6 +172,15 @@ header {
 
 .pill svg { width: 44px; height: 44px; margin-right: 14px; fill: currentColor; }
 
+/* Icon-only pills: Wi-Fi (network name as tooltip) and the ambient lights switch, amber while the
+   lights follow the picture. Dimmed while off. */
+.pill.round { width: 84px; padding: 0; justify-content: center; }
+.pill.round span { display: none; }
+.pill.round svg { margin: 0; opacity: 0.45; transition: opacity 200ms ease, fill 200ms ease; }
+#btnWifi.on svg { opacity: 1; }
+#btnLights.on svg { opacity: 1; fill: #ffc861; }
+#btnLights.on.focused svg { fill: #d48a00; }
+
 .pill.focused {
   background: rgba(255, 255, 255, 0.96);
   border-color: transparent;

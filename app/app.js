@@ -32,7 +32,7 @@
   var $ = function (id) { return document.getElementById(id); };
   var stage = $('stage'), tilesEl = $('tiles'), hero = $('hero');
   var ambients = [$('ambientA'), $('ambientB')], ambientFront = 0, ambientColor = null;
-  var pills = [$('btnInputs'), $('btnWifi'), $('btnSettings'), $('btnTheme')];
+  var pills = [$('btnInputs'), $('btnWifi'), $('btnSettings'), $('btnTheme'), $('btnLights')];
   var panel = $('inputsPanel');
 
   var items = [];               // {app, el, color}
@@ -52,7 +52,9 @@
         var res;
         try { res = JSON.parse(msg); } catch (e) { res = { returnValue: false }; }
         if (cb) cb(res);
-        if (!params || !params.subscribe) bridges.splice(bridges.indexOf(b), 1);
+        // indexOf is -1 once already removed: splice(-1) would drop another call's bridge.
+        var k = bridges.indexOf(b);
+        if (k >= 0 && (!params || !params.subscribe)) bridges.splice(k, 1);
       };
       bridges.push(b);
       b.call(uri, JSON.stringify(params || {}));
@@ -211,7 +213,7 @@
       name.textContent = app.title;
       el.appendChild(name);
       el.addEventListener('mouseover', function () {
-        if (zone !== 'inputs' && !editing) focusTile(items.indexOf(item));
+        if (zone !== 'inputs' && !editing && !pointerBlank) focusTile(items.indexOf(item));
       });
       el.addEventListener('click', function () {
         if (editing) finishEdit(true);
@@ -445,7 +447,9 @@
   function focusPill(i) {
     setZone('top');
     pills[pillFocus].classList.remove('focused');
-    pillFocus = Math.max(0, Math.min(i, pills.length - 1));
+    var last = pills.length - 1;
+    while (last > 0 && pills[last].hidden) last--;   // the lights button hides without root
+    pillFocus = Math.max(0, Math.min(i, last));
     pills[pillFocus].classList.add('focused');
   }
 
@@ -462,6 +466,7 @@
   function pillAbove(i) {
     var cx = tileLeft(i) + TILE_W / 2, best = 0, bestD = Infinity;
     pills.forEach(function (p, k) {
+      if (p.hidden) return;
       var r = p.getBoundingClientRect();
       var d = Math.abs(r.left + r.width / 2 - cx);
       if (d < bestD) { bestD = d; best = k; }
@@ -490,6 +495,8 @@
       else if (res.wifi && res.wifi.state === 'connected') text = res.wifi.ssid || 'Wi-Fi';
       else if (res.isInternetConnectionAvailable === false) text = 'Hors ligne';
       $('wifiLabel').textContent = text;
+      $('btnWifi').title = text;   // the pill shows only its icon
+      $('btnWifi').classList.toggle('on', text !== 'Hors ligne');
     });
   }
 
@@ -497,7 +504,27 @@
     if (i === 0) showInputs();
     else if (i === 1) launch('com.palm.app.settings', 'Paramètres', { target: 'network' });
     else if (i === 2) launch('com.palm.app.settings', 'Paramètres');
-    else applyTheme(theme + 1, true);
+    else if (i === 3) applyTheme(theme + 1, true);
+    else lights('toggle');
+  }
+
+  // ---- ambient lights ------------------------------------------------------------------------
+
+  /**
+   * Runs lights.js on the TV (as root, through Homebrew Channel): HyperHDR's light sync on or off,
+   * or just its state. The button shows the state; lights.js shows the toast.
+   */
+  var LIGHTS = 'node /home/root/tvhome/lights.js ';
+  function lights(action) {
+    luna('luna://org.webosbrew.hbchannel.service/exec', { command: LIGHTS + action }, function (res) {
+      var state;
+      try { state = JSON.parse((res.stdoutString || '').trim().split('\n').pop()); } catch (e) { /* no lights.js */ }
+      var btn = $('btnLights');
+      btn.hidden = !state;   // no root or no lights.js: no button
+      if (!state) { if (pills.indexOf(btn) === pillFocus && zone === 'top') focusPill(pillFocus - 1); return; }
+      btn.classList.toggle('on', state.enabled && !state.error);
+      if (state.error && action !== 'status') toast("L'éclairage ne répond pas");
+    });
   }
 
   // ---- themes --------------------------------------------------------------------------------
@@ -588,7 +615,7 @@
     row.innerHTML = '<svg viewBox="0 0 24 24"><path d="' + icon + '"/></svg>';
     row.appendChild(document.createTextNode(label));
     var idx = inputRows.length;
-    row.addEventListener('mouseover', function () { focusInput(idx); });
+    row.addEventListener('mouseover', function () { if (!pointerBlank) focusInput(idx); });
     row.addEventListener('click', function () { hideInputs(); launch(appId, label); });
     row.appId = appId;
     row.label = label;
@@ -701,14 +728,41 @@
   });
 
   pills.forEach(function (p, i) {
-    p.addEventListener('mouseover', function () { if (zone !== 'inputs') focusPill(i); });
+    p.addEventListener('mouseover', function () { if (zone !== 'inputs' && !pointerBlank) focusPill(i); });
     p.addEventListener('click', function () { activatePill(i); });
+  });
+
+  // ---- pointer -------------------------------------------------------------------------------
+
+  /**
+   * webOS shows the Magic Remote pointer whenever Home is pressed, before the launcher even opens.
+   * Blank it when the launcher comes back, and bring it back once the remote really moves. While
+   * blank, hovering does nothing: the hidden pointer would otherwise pick the tile under it.
+   */
+  var webOS = window.webOSSystem || window.PalmSystem;
+  var pointerBlank = false, blankFrom = null;
+
+  function blankPointer() {
+    if (!webOS || !webOS.setCursor) return;
+    webOS.setCursor('blank');
+    pointerBlank = true;
+    blankFrom = null;
+  }
+
+  document.addEventListener('mousemove', function (e) {
+    if (!pointerBlank) return;
+    if (!blankFrom) { blankFrom = [e.clientX, e.clientY]; return; }   // where the hidden pointer sits
+    if (Math.abs(e.clientX - blankFrom[0]) + Math.abs(e.clientY - blankFrom[1]) > 40) {
+      webOS.setCursor('default');
+      pointerBlank = false;
+    }
   });
 
   // ---- lifecycle -----------------------------------------------------------------------------
 
   /** Back from another app (or opened again from the shortcut): replay the entrance, keep the tile. */
   function resume() {
+    blankPointer();
     if (editing) finishEdit(false);
     updateClock();
     if (zone === 'inputs') panel.classList.add('hidden');
@@ -718,6 +772,7 @@
     focusTile(focused);
     refreshApps();
     refreshInputs();
+    lights('status');
   }
 
   document.addEventListener('webOSRelaunch', resume);
@@ -746,4 +801,5 @@
   focusTile(0);
   refreshApps();
   refreshInputs();
+  lights('status');
 })();

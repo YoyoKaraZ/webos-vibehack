@@ -45,6 +45,7 @@ if [ -n "${ROOT_SSH:-}" ]; then
   # Open the launcher at power-on (see boot-home.js), started at boot by Homebrew Channel. setsid
   # keeps it apart from whatever session starts it.
   ssh "$ROOT_SSH" 'mkdir -p /home/root/tvhome && cat > /home/root/tvhome/boot-home.js' < boot-home.js
+  ssh "$ROOT_SSH" 'cat > /home/root/tvhome/lights.js' < lights.js   # ambient lights, see lights.js
   ssh "$ROOT_SSH" "
     printf '#!/bin/sh\nsetsid node /home/root/tvhome/boot-home.js >> /tmp/tvhome-boot.log 2>&1 < /dev/null &\n' > /var/lib/webosbrew/init.d/tvhome-boot
     chmod 755 /var/lib/webosbrew/init.d/tvhome-boot"

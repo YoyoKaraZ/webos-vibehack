@@ -26,7 +26,11 @@ changes:
 | Layout | Five columns by default; tile size follows the column count. The header stays in place and is aligned with the grid; only the grid scrolls |
 | Language | Interface in French, 24-hour clock |
 | Focus | The glass frame that slid between tiles is gone: the focused tile itself lifts, tvOS style (12 % larger, raised, soft shadow, light sheen, a 5° spring tilt toward the direction of travel). Only transform and opacity animate, so it stays smooth on the TV's GPU |
+| Ambient lights | A lights button in the header and the remote's AI, CH+ and CH- keys drive [HyperHDR](https://github.com/awawa-dev/HyperHDR) through [`lights.js`](lights.js): sync on or off and brightness, with a toast. Like Hue Sync, switching off puts the lamps back as they were (Hue and Nanoleaf). See [Ambient lights](#ambient-lights) |
+| Pointer | webOS shows the Magic Remote pointer on every Home press; the launcher blanks it when it comes back (`webOSSystem.setCursor('blank')`) until the remote really moves |
+| Header | Wi-Fi and lights are icon-only round buttons, so the header fits next to the date |
 | Fix | The dock app name no longer stays on screen when scrolling right after switching apps |
+| Fix | Several root calls at once (apps, inputs, lights) could drop one another's reply, which brought back unused inputs |
 
 The Home button itself is remapped outside this repo, with the homebrew tool inputhook: see
 [The Home button on a rooted TV](#the-home-button-on-a-rooted-tv).
@@ -158,12 +162,34 @@ Closing an app sends webOS back to LG's home; `boot-home.js` watches the foregro
 the launcher instead. The LG Channels rule touches `/tmp/tvhome-lghome` first, which tells
 `boot-home.js` to leave LG's home on screen.
 
+### Ambient lights
+
+With HyperHDR (lamps) and PicCap (screen capture) from Homebrew Channel, [`lights.js`](lights.js)
+switches the light sync on and off and sets its brightness on every HyperHDR instance, over
+HyperHDR's WebSocket, and shows a toast. The launcher's bulb button and inputhook call it:
+
+```json
+{
+  "428": {"action": "exec", "command": "node /home/root/tvhome/lights.js toggle"},
+  "402": {"action": "exec", "command": "node /home/root/tvhome/lights.js up"},
+  "403": {"action": "exec", "command": "node /home/root/tvhome/lights.js down"}
+}
+```
+
+(AI, CH+ and CH- on an LG MR25GA remote.) Switching on saves the state of the lamps, switching
+off restores it, for Philips Hue (CLIP v2) and Nanoleaf; this needs `/home/root/tvhome/hue.json`
+(`bridge`, `key`, `area`) and `nanoleaf.json` (`host`, `token`) on the TV, never in the repo.
+`boot-home.js` re-applies the sync state at boot, since HyperHDR forgets it when it restarts.
+The bulb button hides itself when `lights.js` is not installed. Protected video (Netflix and
+other DRM apps) comes through the capture as black: only YouTube, HDMI sources and the like can
+drive the lamps.
+
 ### Undo everything on a rooted TV
 
 ```bash
 ssh root@<TV>
 pkill -f '[b]oot-home.js'
-rm -rf /var/lib/webosbrew/init.d/tvhome-boot /home/root/tvhome
+rm -rf /var/lib/webosbrew/init.d/tvhome-boot /home/root/tvhome   # also removes lights.js and the lamp keys
 echo '{}' > /home/root/.config/lginputhook/keybinds.json
 luna-send -n 1 luna://com.webos.appInstallService/dev/remove '{"id":"com.gathin.tvhome"}'
 ```
