@@ -176,7 +176,8 @@ header {
    lights follow the picture. Dimmed while off. */
 .pill.round { width: 84px; padding: 0; justify-content: center; }
 .pill.round span { display: none; }
-.pill.round svg { margin: 0; opacity: 0.45; transition: opacity 200ms ease, fill 200ms ease; }
+.pill.round svg { margin: 0; transition: opacity 200ms ease, fill 200ms ease; }
+#btnWifi svg, #btnLights svg { opacity: 0.45; }
 #btnWifi.on svg { opacity: 1; }
 #btnLights.on svg { opacity: 1; fill: #ffc861; }
 #btnLights.on.focused svg { fill: #d48a00; }

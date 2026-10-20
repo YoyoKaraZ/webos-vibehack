@@ -32,7 +32,7 @@
   var $ = function (id) { return document.getElementById(id); };
   var stage = $('stage'), tilesEl = $('tiles'), hero = $('hero');
   var ambients = [$('ambientA'), $('ambientB')], ambientFront = 0, ambientColor = null;
-  var pills = [$('btnInputs'), $('btnWifi'), $('btnSettings'), $('btnTheme'), $('btnLights')];
+  var pills = [$('btnInputs'), $('btnWifi'), $('btnSettings'), $('btnTheme'), $('btnPosition'), $('btnLights')];
   var panel = $('inputsPanel');
 
   var items = [];               // {app, el, color}
@@ -505,6 +505,7 @@
     else if (i === 1) launch('com.palm.app.settings', 'Paramètres', { target: 'network' });
     else if (i === 2) launch('com.palm.app.settings', 'Paramètres');
     else if (i === 3) applyTheme(theme + 1, true);
+    else if (i === 4) lights('position');
     else lights('toggle');
   }
 
@@ -512,17 +513,20 @@
 
   /**
    * Runs lights.js on the TV (as root, through Homebrew Channel): HyperHDR's light sync on or off,
-   * or just its state. The button shows the state; lights.js shows the toast.
+   * the TV's position (which room it faces, so which picture area each lamp follows), or just the
+   * state. The buttons show the state; lights.js shows the toast.
    */
+  var POSITION_LABELS = { chambre: 'Chambre', salon: 'Salon' };
   var LIGHTS = 'node /home/root/tvhome/lights.js ';
   function lights(action) {
     luna('luna://org.webosbrew.hbchannel.service/exec', { command: LIGHTS + action }, function (res) {
       var state;
       try { state = JSON.parse((res.stdoutString || '').trim().split('\n').pop()); } catch (e) { /* no lights.js */ }
-      var btn = $('btnLights');
-      btn.hidden = !state;   // no root or no lights.js: no button
-      if (!state) { if (pills.indexOf(btn) === pillFocus && zone === 'top') focusPill(pillFocus - 1); return; }
+      var btn = $('btnLights'), pos = $('btnPosition');
+      btn.hidden = pos.hidden = !state;   // no root or no lights.js: no lights buttons
+      if (!state) { if (pills.indexOf(btn) <= pillFocus && zone === 'top') focusPill(pillFocus - 2); return; }
       btn.classList.toggle('on', state.enabled && !state.error);
+      if (state.position) $('positionLabel').textContent = POSITION_LABELS[state.position] || state.position;
       if (state.error && action !== 'status') toast("L'éclairage ne répond pas");
     });
   }

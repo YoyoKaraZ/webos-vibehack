@@ -28,7 +28,8 @@ changes:
 | Focus | The glass frame that slid between tiles is gone: the focused tile itself lifts, tvOS style (12 % larger, raised, soft shadow, light sheen, a 5° spring tilt toward the direction of travel). Only transform and opacity animate, so it stays smooth on the TV's GPU |
 | Ambient lights | A lights button in the header and the remote's AI, CH+ and CH- keys drive [HyperHDR](https://github.com/awawa-dev/HyperHDR) through [`lights.js`](lights.js): sync on or off and brightness, with a toast. Like Hue Sync, switching off puts the lamps back as they were (Hue and Nanoleaf). See [Ambient lights](#ambient-lights) |
 | Pointer | webOS shows the Magic Remote pointer on every Home press; the launcher blanks it when it comes back (`webOSSystem.setCursor('blank')`) until the remote really moves |
-| Header | Wi-Fi and lights are icon-only round buttons, so the header fits next to the date |
+| Header | Wi-Fi, settings and lights are icon-only round buttons, so the header fits next to the date |
+| TV position | For a TV on a swivel arm facing one of two rooms: a Chambre / Salon button switches which picture area each lamp follows (left/right and front/back swap), see [Ambient lights](#ambient-lights) |
 | Fix | The dock app name no longer stays on screen when scrolling right after switching apps |
 | Fix | Several root calls at once (apps, inputs, lights) could drop one another's reply, which brought back unused inputs |
 
@@ -180,7 +181,14 @@ HyperHDR's WebSocket, and shows a toast. The launcher's bulb button and inputhoo
 off restores it, for Philips Hue (CLIP v2) and Nanoleaf; this needs `/home/root/tvhome/hue.json`
 (`bridge`, `key`, `area`) and `nanoleaf.json` (`host`, `token`) on the TV, never in the repo.
 `boot-home.js` re-applies the sync state at boot, since HyperHDR forgets it when it restarts.
-The bulb button hides itself when `lights.js` is not installed. Protected video (Netflix and
+The bulb button hides itself when `lights.js` is not installed.
+
+`node lights.js position [chambre|salon]` (the Chambre / Salon button) rewrites HyperHDR's LED
+layout for the room the TV faces: each Hue lamp's picture area comes from its place in the
+entertainment area, mirrored left/right and front/back for the second room, and the Nanoleaf
+panels move to the other picture edge (`NANOLEAF_EDGE`). It reads HyperHDR's whole config and
+sends it all back, as `setconfig` replaces it, and needs the admin password (`hyperhdr.pass`,
+else HyperHDR's default). Protected video (Netflix and
 other DRM apps) comes through the capture as black: only YouTube, HDMI sources and the like can
 drive the lamps.
 

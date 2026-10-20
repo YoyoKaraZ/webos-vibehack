@@ -4,7 +4,7 @@
  * bright the lamps get, on every HyperHDR instance (one per set of lamps), with a toast on screen.
  * Used by the launcher's lights button and by inputhook (CH+ / CH-). install.sh copies it to the TV.
  *
- *   node lights.js toggle | on | off | up | down | apply | status
+ *   node lights.js toggle | on | off | up | down | apply | status | position [chambre|salon]
  *
  * Prints the resulting state as JSON. The state is kept in STATE_FILE; `apply` re-sends it after a
  * reboot. If HyperHDR has an admin password, put it alone in PASSWORD_FILE (never in the repo).
@@ -13,6 +13,11 @@
  * white, Nanoleaf effect) and switching it off puts them back. That needs the lamps' keys on the
  * TV, kept out of the repo: HUE_FILE {"bridge", "key", "area"} and NANOLEAF_FILE {"host", "token"}.
  * Without them, the lamps are just left as the sync last set them.
+ *
+ * The TV hangs on a swivel arm and faces one of two rooms. `position` switches which picture area
+ * each lamp follows: the Hue entertainment area was set up from the "chambre" side, so for the
+ * "salon" side left and right swap and so do front and back. That rewrites HyperHDR's LED layout,
+ * which needs the admin password (PASSWORD_FILE, else HyperHDR's default).
  */
 'use strict';
 const net = require('net');
@@ -34,6 +39,12 @@ const LOCK_DIR = '/tmp/tvhome-lights.lock';
 // HyperHDR's streaming mode. '' picks the first effect of the panels' own list.
 const NANOLEAF_FALLBACK_EFFECT = '';
 const NANOLEAF_STREAMING = '*ExtControl*';
+const POSITIONS = ['chambre', 'salon'];      // first: the side the Hue area was laid out from
+const POSITION_LABELS = { chambre: 'Chambre', salon: 'Salon' };
+// Picture edge the Nanoleaf panels sample, per position (they hang left of the screen from the
+// chambre side, so they end up on its right once the TV faces the salon).
+const NANOLEAF_EDGE = { chambre: 'left', salon: 'right' };
+const DEFAULT_PASSWORD = 'hyperhdr';         // HyperHDR's own default, used without PASSWORD_FILE
 
 const https = require('https');
 const http = require('http');
@@ -146,8 +157,14 @@ async function restore() {
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 function load() {
-  try { return Object.assign({ enabled: true, level: 1 }, JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'))); }
-  catch (e) { return { enabled: true, level: 1 }; }
+  const base = { enabled: true, level: 1, position: POSITIONS[0] };
+  try { return Object.assign(base, JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'))); }
+  catch (e) { return base; }
+}
+
+function password() {
+  try { return fs.readFileSync(PASSWORD_FILE, 'utf8').trim() || DEFAULT_PASSWORD; }
+  catch (e) { return DEFAULT_PASSWORD; }
 }
 
 /** One WebSocket session with HyperHDR: switching instance only works over its WebSocket. */
@@ -211,8 +228,8 @@ function hyperhdr(commands) {
 async function push(state) {
   const cmds = [];
   try {
-    const password = fs.readFileSync(PASSWORD_FILE, 'utf8').trim();
-    if (password) cmds.push({ command: 'authorize', subcommand: 'login', password: password });
+    const pass = fs.readFileSync(PASSWORD_FILE, 'utf8').trim();
+    if (pass) cmds.push({ command: 'authorize', subcommand: 'login', password: pass });
   } catch (e) { /* no admin password set */ }
   for (const i of INSTANCES) {
     cmds.push({ command: 'instance', subcommand: 'switchTo', instance: i });
@@ -221,6 +238,49 @@ async function push(state) {
   }
   const failed = (await hyperhdr(cmds)).filter(r => r.success === false);
   if (failed.length) throw new Error(failed.map(r => r.command + ': ' + r.error).join('; '));
+}
+
+/**
+ * The picture area a Hue lamp follows, from its place in the entertainment area (x: -1 left to
+ * 1 right, y: -1 viewer to 1 TV, z: -1 floor to 1 ceiling) as seen from the viewer.
+ */
+function hueRegion(p) {
+  if (p.y < -0.5) return { hmin: 0.2, hmax: 0.8, vmin: 0.3, vmax: 1.0 };   // behind the viewer: whole picture
+  const c = Math.max(0.15, Math.min(0.85, (p.x + 1) / 2));
+  const v = p.z > 0 ? { vmin: 0.1, vmax: 0.6 } : { vmin: 0.5, vmax: 1.0 };
+  return Object.assign({ hmin: +(c - 0.15).toFixed(3), hmax: +(c + 0.15).toFixed(3) }, v);
+}
+
+/** Rewrites the LED layout of every instance for the TV's position. */
+async function applyPosition(position) {
+  const flip = position !== POSITIONS[0];
+  const hue = readJson(HUE_FILE);
+  let hueLeds = null;
+  if (hue) {
+    const h = { 'hue-application-key': hue.key };
+    const area = (await request('https://' + hue.bridge + '/clip/v2/resource/entertainment_configuration/' + hue.area, 'GET', h)).data[0];
+    hueLeds = area.channels.sort((a, b) => a.channel_id - b.channel_id).map(ch => {
+      const p = ch.position;
+      return hueRegion(flip ? { x: -p.x, y: -p.y, z: p.z } : p);   // the TV turned around: mirror both axes
+    });
+  }
+  const login = { command: 'authorize', subcommand: 'login', password: password() };
+  for (const i of INSTANCES) {
+    const got = await hyperhdr([login, { command: 'instance', subcommand: 'switchTo', instance: i },
+      { command: 'config', subcommand: 'getconfig' }]);
+    const config = got[2] && got[2].info;
+    if (!config || !config.device) throw new Error('no config for instance ' + i);
+    if (config.device.type === 'philipshue' && hueLeds && hueLeds.length === config.leds.length) {
+      config.leds = hueLeds;
+    } else if (config.device.type === 'nanoleaf') {
+      const n = config.leds.length, left = NANOLEAF_EDGE[position] === 'left';
+      config.leds = config.leds.map((l, k) => ({ hmin: left ? 0 : 0.75, hmax: left ? 0.25 : 1, vmin: k / n, vmax: (k + 1) / n }));
+    } else continue;
+    // setconfig replaces the whole instance config: always send all of it back.
+    const set = await hyperhdr([login, { command: 'instance', subcommand: 'switchTo', instance: i },
+      { command: 'config', subcommand: 'setconfig', config: config }]);
+    if (!set[2] || !set[2].success) throw new Error('setconfig failed on instance ' + i);
+  }
 }
 
 function toast(message) {
@@ -238,6 +298,18 @@ async function main(action) {
   else if (action === 'off') state.enabled = false;
   else if (action === 'up') { state.level = round(Math.min(1, state.level + STEP)); state.enabled = true; }
   else if (action === 'down') { state.level = round(Math.max(MIN, state.level - STEP)); state.enabled = true; }
+  else if (action === 'position') {
+    const want = process.argv[3];
+    const next = POSITIONS.indexOf(want) >= 0 ? want
+      : POSITIONS[(POSITIONS.indexOf(state.position) + 1) % POSITIONS.length];
+    await applyPosition(next);
+    await push(state);   // re-initialising the devices must not switch a paused sync back on
+    state.position = next;
+    fs.writeFileSync(STATE_FILE, JSON.stringify(state));
+    toast('Position de la TV : ' + POSITION_LABELS[next]);
+    console.log(JSON.stringify(state));
+    return;
+  }
   else if (action !== 'apply' && action !== 'status') throw new Error('unknown action ' + action);
 
   if (action !== 'status') {
