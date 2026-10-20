@@ -168,7 +168,7 @@ header {
 
 .item.dock .name { display: none; }
 
-/* Rearranging: the held tile wiggles and floats above the others; the glass steps aside. */
+/* Rearranging: the held tile wiggles and floats above the others. */
 .item.moving { z-index: 2; }
 
 .item.moving .card {
@@ -181,7 +181,6 @@ header {
   to { transform: scale(1.1) rotate(1.2deg); }
 }
 
-body.editing #glass { opacity: 0 !important; }
 
 .card {
   position: relative;
@@ -190,8 +189,43 @@ body.editing #glass { opacity: 0 !important; }
   border-radius: 32px;
   overflow: hidden;
   background: #1c1c1e;
-  transition: transform 180ms ease;
+  transform: perspective(900px) rotateX(var(--tilt-x, 0deg)) rotateY(var(--tilt-y, 0deg));
+  /* Only transform and opacity animate, which the TV's GPU composites without repainting. The
+     overshoot gives the lift and the tilt their spring. */
+  transition: transform 420ms cubic-bezier(0.2, 0.9, 0.3, 1.25);
+  will-change: transform;
 }
+
+/* Light sheen across the top of the focused tile, faded in. */
+.card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: radial-gradient(120% 90% at 50% -10%, rgba(255, 255, 255, 0.32),
+    rgba(255, 255, 255, 0.06) 45%, rgba(255, 255, 255, 0) 70%);
+  opacity: 0;
+  transition: opacity 260ms ease;
+  pointer-events: none;
+}
+
+/* The lift shadow: drawn once under every tile and only faded in, never re-blurred. */
+.item::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: var(--tile-w, 360px);
+  height: var(--tile-h, 202px);
+  border-radius: 32px;
+  box-shadow: 0 36px 64px rgba(0, 0, 0, 0.6), 0 12px 24px rgba(0, 0, 0, 0.4);
+  opacity: 0;
+  transform: translateY(-6px) scale(1.12);
+  transition: opacity 320ms ease;
+  will-change: opacity;
+}
+
+.item.focused::before { opacity: 1; }
 
 /* Faint rim so black tiles (Apple TV) still read against the black page. */
 .card::after {
@@ -202,10 +236,15 @@ body.editing #glass { opacity: 0 !important; }
   box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.1);
 }
 
+/* Focus, tvOS style: the tile itself lifts off the page. */
+.item.focused { z-index: 1; }
+
 .item.focused .card {
-  transform: scale(1.1);
-  transition: transform 260ms cubic-bezier(0.34, 1.6, 0.5, 1);
+  transform: perspective(900px) translateY(-6px) scale(1.12)
+    rotateX(var(--tilt-x, 0deg)) rotateY(var(--tilt-y, 0deg));
 }
+
+.item.focused .card::before { opacity: 1; }
 
 .card img {
   position: absolute;
@@ -239,32 +278,6 @@ body.editing #glass { opacity: 0 !important; }
 }
 
 .item.focused .name { opacity: 1; transform: translateY(8px); }
-
-/* The single floating glass highlight that springs between tiles. */
-#glass {
-  position: absolute;
-  left: 0;
-  top: 0;
-  border-radius: 47px;
-  border: 3px solid rgba(255, 255, 255, 0.8);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.24), rgba(255, 255, 255, 0.07));
-  box-shadow: 0 0 4px 2px rgba(255, 255, 255, 0.19), 0 0 12px 4px rgba(255, 255, 255, 0.08);
-  overflow: hidden;
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 180ms ease, transform 520ms cubic-bezier(0.3, 1.35, 0.45, 1);
-}
-
-/* Bright top specular. */
-#glass::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: 0;
-  height: 45%;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.4), rgba(255, 255, 255, 0));
-}
 
 /* ---- inputs dropdown ------------------------------------------------------------------------- */
 

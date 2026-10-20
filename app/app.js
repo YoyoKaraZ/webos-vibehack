@@ -1,6 +1,7 @@
 /*
- * tvOS style home for webOS: black, a pinned dock row, an app grid, and one glass highlight that
- * springs between tiles. A port of the Android launcher in ../../launcher.
+ * tvOS style home for webOS: a pinned dock row and an app grid, where the focused tile lifts off the
+ * page with a soft shadow, a light sheen and a small spring tilt in the
+ * direction of travel. A port of the Android launcher in ../../launcher.
  *
  * webOS does not let third-party apps list installed apps, so sync-apps.py writes them into apps.js.
  * On a TV rooted with Homebrew Channel, the live list replaces that snapshot (fetchLiveApps).
@@ -15,8 +16,7 @@
   var ROW_PITCH = TILE_H + 90;
   var DOCK_TOP = 708;           // tile top of the dock row: next row peeks in at the bottom
   var DOCK_GAP = 36;            // extra space below the dock
-  var FOCUS_SCALE = 1.1;
-  var GLASS_PAD = 12;           // room for the glass glow around the scaled tile
+  var TILT_DEG = 5;             // how far a newly focused tile leans toward the direction of travel
   var VIEW_TOP, VIEW_BOTTOM = 1060;         // area grid rows scroll into: below the header, set at start
 
   var KEY = { LEFT: 37, UP: 38, RIGHT: 39, DOWN: 40, OK: 13, BACK: 461, ESC: 27 };
@@ -30,7 +30,7 @@
   var ICON_LIVETV = 'M21,6h-7.59l3.29,-3.29L16,2l-4,4l-4,-4l-0.71,0.71L10.59,6H3c-1.1,0 -2,0.89 -2,2v12c0,1.1 0.9,2 2,2h18c1.1,0 2,-0.89 2,-2V8C23,6.89 22.1,6 21,6zM21,20H3V8h18V20zM9,10v8l7,-4L9,10z';
 
   var $ = function (id) { return document.getElementById(id); };
-  var stage = $('stage'), tilesEl = $('tiles'), glass = $('glass'), hero = $('hero');
+  var stage = $('stage'), tilesEl = $('tiles'), hero = $('hero');
   var ambients = [$('ambientA'), $('ambientB')], ambientFront = 0, ambientColor = null;
   var pills = [$('btnInputs'), $('btnWifi'), $('btnSettings'), $('btnTheme')];
   var panel = $('inputsPanel');
@@ -38,7 +38,7 @@
   var items = [];               // {app, el, color}
   var zone = 'grid';            // 'grid' | 'top' | 'inputs'
   var focused = 0, pillFocus = 0, inputFocus = 0, inputRows = [];
-  var offset = 0, heroShown = false, glassShown = false;
+  var offset = 0, heroShown = false, tiltTimer = null;
   var editing = null;           // {item, snapshot} while a tile is being moved
 
   // ---- luna bus ------------------------------------------------------------------------------
@@ -352,48 +352,47 @@
     return rgb.map(function (k) { return Math.round((k + m) * 255); });
   }
 
-  // ---- focus & glass -------------------------------------------------------------------------
+  // ---- focus -------------------------------------------------------------------------------
 
   function focusTile(i) {
     if (!items.length) return;
     i = Math.max(0, Math.min(i, items.length - 1));
+    var from = zone === 'grid' && i !== focused ? focused : -1;
     setZone('grid');
     if (items[focused]) items[focused].el.classList.remove('focused');
     focused = i;
     items[i].el.classList.add('focused');
+    if (from >= 0) tilt(items[i].card, (i % COLUMNS) - (from % COLUMNS), rowOf(i) - rowOf(from));
 
     var top = tileTop(i), row = rowOf(i);
     if (row === 0) {
       offset = 0;
     } else {
-      // Scroll just enough so the whole glass and the name below the tile are visible.
+      // Scroll just enough so the whole lifted tile and the name below it are visible.
       if (top - offset + TILE_H + 70 > VIEW_BOTTOM) offset = top + TILE_H + 70 - VIEW_BOTTOM;
       if (top - offset - 24 < VIEW_TOP) offset = top - 24 - VIEW_TOP;
     }
     stage.style.transform = 'translateY(' + (-offset) + 'px)';
-
-    var w = TILE_W * FOCUS_SCALE + 2 * GLASS_PAD, h = TILE_H * FOCUS_SCALE + 2 * GLASS_PAD;
-    var x = tileLeft(i) + TILE_W / 2 - w / 2, y = top + TILE_H / 2 - h / 2;
-    glass.style.width = w + 'px';
-    glass.style.height = h + 'px';
-    glass.style.transform = 'translate(' + x + 'px,' + y + 'px)';
-    if (!glassShown) {
-      // First show: jump there without the spring, then fade in.
-      glass.style.transition = 'none';
-      glass.offsetWidth;   // flush the jump before restoring the transition
-      glass.style.transition = '';
-      glass.style.opacity = '1';
-      glassShown = true;
-    }
 
     if (row === 0) showHero(items[i]);
     else hideHero();
     setAmbient(items[i].color);   // the glow follows the focused tile in every row
   }
 
-  function hideGlass() {
-    glassShown = false;
-    glass.style.opacity = '0';
+  /**
+   * Leans the card toward the direction of travel, then lets it spring back flat (the spring is the
+   * CSS transition on .card).
+   */
+  function tilt(card, dx, dy) {
+    dx = Math.max(-1, Math.min(1, dx));
+    dy = Math.max(-1, Math.min(1, dy));
+    card.style.setProperty('--tilt-x', (-dy * TILT_DEG) + 'deg');
+    card.style.setProperty('--tilt-y', (dx * TILT_DEG) + 'deg');
+    clearTimeout(tiltTimer);
+    tiltTimer = setTimeout(function () {
+      card.style.setProperty('--tilt-x', '0deg');
+      card.style.setProperty('--tilt-y', '0deg');
+    }, 140);
   }
 
   function showHero(item) {
@@ -455,7 +454,6 @@
     if (zone === 'top') pills[pillFocus].classList.remove('focused');
     if (zone === 'grid') {
       if (items[focused]) items[focused].el.classList.remove('focused');
-      hideGlass();
     }
     zone = z;
   }

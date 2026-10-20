@@ -24,6 +24,7 @@ changes:
 | Themes | A theme button cycles backgrounds defined in `config.js` (Aurore, the default, App colour, Noir, Graphite, Minuit); the choice is kept on the TV |
 | Layout | Five columns by default; tile size follows the column count. The header stays in place and is aligned with the grid; only the grid scrolls |
 | Language | Interface in French, 24-hour clock |
+| Focus | The glass frame that slid between tiles is gone: the focused tile itself lifts, tvOS style (12 % larger, raised, soft shadow, light sheen, a 5° spring tilt toward the direction of travel). Only transform and opacity animate, so it stays smooth on the TV's GPU |
 | Fix | The dock app name no longer stays on screen when scrolling right after switching apps |
 
 The Home button itself is remapped outside this repo, with the homebrew tool inputhook: see
@@ -168,8 +169,9 @@ luna-send -n 1 luna://com.webos.appInstallService/dev/remove '{"id":"com.gathin.
 
 ## Using it
 
-Same as the [Android launcher](https://github.com/Gathin23/tv-vibehack#the-launcher): a dock of
-one row of apps with the focused app's name above it and a glow in its colour, the rest of your
+Same as the [Android launcher](https://github.com/Gathin23/tv-vibehack#the-launcher), with a
+tvOS-style focus where the tile lifts off the page: a dock of one row of apps with the focused app's
+name above it and a glow in its colour, the rest of your
 apps in a grid below, and Inputs, Wi-Fi, Settings and the theme button at the top. The header stays in place; the grid scrolls below it. The interface is in
 French.
 
