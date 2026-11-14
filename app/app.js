@@ -242,10 +242,13 @@
     band.style.height = (TILE_H + 56) + 'px';
   }
 
+  /** Entrance: only the dock and the row under it animate; the rest is off screen anyway. */
   function animateIn() {
+    var animated = COLUMNS * 2;
     items.forEach(function (it, i) {
+      if (i >= animated) { it.el.classList.add('shown'); return; }
       it.el.classList.remove('shown');
-      setTimeout(function () { it.el.classList.add('shown'); }, 60 + Math.min(i, 16) * 40);
+      setTimeout(function () { it.el.classList.add('shown'); }, 60 + i * 40);
     });
   }
 
@@ -518,13 +521,17 @@
    */
   var POSITION_LABELS = { chambre: 'Chambre', salon: 'Salon' };
   var LIGHTS = 'node /home/root/tvhome/lights.js ';
+  // The state alone is read from its file: starting Node for it would stall the launcher's entrance.
+  var LIGHTS_STATUS = 'test -f /home/root/tvhome/lights.js && (cat /home/root/tvhome/lights.json 2>/dev/null || echo "{}")';
   function lights(action) {
-    luna('luna://org.webosbrew.hbchannel.service/exec', { command: LIGHTS + action }, function (res) {
+    var command = action === 'status' ? LIGHTS_STATUS : LIGHTS + action;
+    luna('luna://org.webosbrew.hbchannel.service/exec', { command: command }, function (res) {
       var state;
       try { state = JSON.parse((res.stdoutString || '').trim().split('\n').pop()); } catch (e) { /* no lights.js */ }
       var btn = $('btnLights'), pos = $('btnPosition');
       btn.hidden = pos.hidden = !state;   // no root or no lights.js: no lights buttons
       if (!state) { if (pills.indexOf(btn) <= pillFocus && zone === 'top') focusPill(pillFocus - 2); return; }
+      if (!state.position) state.position = 'chambre';
       btn.classList.toggle('on', state.enabled && !state.error);
       if (state.position) $('positionLabel').textContent = POSITION_LABELS[state.position] || state.position;
       if (state.error && action !== 'status') toast("L'éclairage ne répond pas");
@@ -765,7 +772,14 @@
   // ---- lifecycle -----------------------------------------------------------------------------
 
   /** Back from another app (or opened again from the shortcut): replay the entrance, keep the tile. */
+  var lastResume = 0, lastAppsRefresh = 0;
+
   function resume() {
+    // Coming back fires both a relaunch and a visibility change: do the work once.
+    if (Date.now() - lastResume < 800) return;
+    lastResume = Date.now();
+    // An app that handles its relaunch must bring itself to the front: harmless otherwise.
+    if (webOS && webOS.activate) webOS.activate();
     blankPointer();
     if (editing) finishEdit(false);
     updateClock();
@@ -774,14 +788,38 @@
     zone = 'none';
     animateIn();
     focusTile(focused);
-    refreshApps();
-    refreshInputs();
-    lights('status');
+    // Root calls compete with the entrance for the CPU: run them once it has played, spread out,
+    // and re-read the app list at most once a minute.
+    setTimeout(function () { refreshInputs(); lights('status'); }, 700);
+    if (Date.now() - lastAppsRefresh > 60000) {
+      setTimeout(function () { lastAppsRefresh = Date.now(); refreshApps(); }, 1400);
+    }
   }
 
-  document.addEventListener('webOSRelaunch', resume);
+  /**
+   * Home pressed again while the launcher is already on screen: back to the last input watched,
+   * as webOS remembers it. An audio-only input (the sound bar) is skipped for the first live one.
+   */
+  var visibleSince = Date.now();
+
+  function lastInput() {
+    rootLuna('luna://com.webos.service.eim/getLastInput', function (reply) {
+      var id = reply.lastSourceAppId;
+      var live = (liveInputs || []).map(function (i) { return i.appId; });
+      if (live.length && live.indexOf(id) < 0) id = live[0];
+      if (id) launch(id, 'la dernière source');
+      else toast('Aucune source récente');
+    });
+  }
+
+  document.addEventListener('webOSRelaunch', function () {
+    // Already in front for a while: that's a second press, not coming back from an app.
+    if (!document.hidden && visibleSince && Date.now() - visibleSince > 1000) lastInput();
+    else resume();
+  });
   document.addEventListener('visibilitychange', function () {
     document.body.classList.toggle('away', document.hidden);   // pauses the background while an app is in front
+    visibleSince = document.hidden ? 0 : Date.now();
     if (!document.hidden) resume();
   });
 
@@ -803,7 +841,8 @@
   animateIn();
   zone = 'none';
   focusTile(0);
+  lastResume = Date.now();   // the first visibility change must not replay the entrance
+  lastAppsRefresh = Date.now();
   refreshApps();
-  refreshInputs();
-  lights('status');
+  setTimeout(function () { refreshInputs(); lights('status'); }, 700);
 })();

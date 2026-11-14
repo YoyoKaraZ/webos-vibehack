@@ -113,6 +113,9 @@
 
   function show() {
     closing = false;
+    // It handles its own relaunch (to close on a second press), so it must come to the front itself.
+    var webOS = window.webOSSystem || window.PalmSystem;
+    if (webOS && webOS.activate) webOS.activate();
     try { inputs = JSON.parse(localStorage.getItem(CACHE_KEY)) || []; } catch (e) { inputs = []; }
     render();
     requestAnimationFrame(function () { document.body.classList.add('shown'); });

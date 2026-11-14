@@ -11,5 +11,11 @@
   "iconColor": "#000000",
   "resolution": "1920x1080",
   "disableBackHistoryAPI": true,
-  "requiredACG": ["application.launcher", "network.query"]
+  "requiredACG": [
+    "application.launcher",
+    "network.query"
+  ],
+  "noSplashOnLaunch": true,
+  "splashBackground": "splash.png",
+  "supportQuickStart": true
 }

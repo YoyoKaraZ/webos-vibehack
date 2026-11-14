@@ -148,6 +148,24 @@ function watchPreloads() {
   });
 }
 
+/**
+ * webOS keeps the apps listed in its keepAliveApps setting loaded for good: that is why LG's own
+ * home shows up at once. Adding the launcher and the input picker spares them a reload from
+ * scratch (and its splash) after webOS reclaims memory. Checked at every boot.
+ */
+const KEEP_ALIVE = [LAUNCHER, 'com.gathin.tvhome.inputs'];
+const KEEP_ALIVE_KEY = 'com.webos.applicationManager.keepAliveApps';
+async function keepAlive() {
+  const r = await call('luna://com.webos.service.config/getConfigs', { configNames: [KEEP_ALIVE_KEY] });
+  const list = (r.configs && r.configs[KEEP_ALIVE_KEY]) || [];
+  const missing = KEEP_ALIVE.filter(id => list.indexOf(id) < 0);
+  if (!missing.length) return;
+  const configs = {};
+  configs[KEEP_ALIVE_KEY] = list.concat(missing);
+  const ok = (await call('luna://com.webos.service.config/setConfigs', { configs: configs })).returnValue;
+  log('boot: keep-alive ' + (ok ? 'added ' : 'could not add ') + missing.join(', '));
+}
+
 /** The light sync never starts on its own: at boot, make sure it is off (see lights.js). */
 const LIGHTS = '/home/root/tvhome/lights.js';
 async function restoreLights() {
@@ -230,6 +248,7 @@ function watchPower() {
         log('started, power state ' + msg.state);
         stopPreload('boot');
         restoreLights();
+        keepAlive();
         if (msg.state === 'Active') poweredOn('boot', msg);
       } else if (state === null) {
         // resubscribed: just pick up the current state
