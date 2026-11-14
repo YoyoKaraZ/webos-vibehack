@@ -65,6 +65,8 @@ async function poweringOff() {
   lastApp = app;
   try { fs.writeFileSync(LAST_FILE, app); } catch (e) { /* kept in memory until a reboot */ }
   log('powering off on ' + app);
+  // The light sync stops with the TV: lamps back as they were, HyperHDR and PicCap stopped.
+  if (fs.existsSync(LIGHTS)) execFile('node', [LIGHTS, 'off'], err => log('powering off: lights ' + (err ? 'could not be switched off' : 'switched off')));
 }
 
 /**
@@ -146,19 +148,24 @@ function watchPreloads() {
   });
 }
 
-/**
- * HyperHDR forgets the lights state (on or off, brightness) set by lights.js when it restarts:
- * re-apply it at boot, retrying while HyperHDR starts. Skipped when lights.js isn't installed.
- */
+/** The light sync never starts on its own: at boot, make sure it is off (see lights.js). */
 const LIGHTS = '/home/root/tvhome/lights.js';
 async function restoreLights() {
   if (!fs.existsSync(LIGHTS)) return;
-  for (let i = 0; i < 12; i++) {
-    const ok = await new Promise(r => execFile('node', [LIGHTS, 'apply'], err => r(!err)));
-    if (ok) return log('boot: lights state restored');
-    await sleep(10000);
-  }
-  log('boot: could not restore the lights state, HyperHDR not answering');
+  const ok = await new Promise(r => execFile('node', [LIGHTS, 'apply'], err => r(!err)));
+  log('boot: light sync ' + (ok ? 'off' : 'could not be switched off'));
+}
+
+/**
+ * LG's home came up without being asked for. After an input (webOS restoring its "last input"
+ * on top of it, or at boot) go back to that input; otherwise (an app was closed) the launcher.
+ */
+async function replaceLgHome(previous) {
+  let target = LAUNCHER;
+  if (SOURCES.test(previous)) target = previous;
+  else if (!previous && await isPictureSource(lastApp)) target = lastApp;
+  const ok = (await call('luna://com.webos.applicationManager/launch', { id: target })).returnValue;
+  log('LG home after ' + (previous || 'nothing') + (ok ? ', opened ' : ', could not open ') + target);
 }
 
 let busy = false;
@@ -170,6 +177,11 @@ async function poweredOn(why, msg) {
   try {
     if (await isPictureSource(lastApp)) {
       log(why + ': turned off on ' + lastApp + ', leaving the input');
+      // webOS may have put its own home over the input before this ran: bring the input back.
+      if (await foreground() === LG_HOME) {
+        await call('luna://com.webos.applicationManager/launch', { id: lastApp });
+        log(why + ': LG home was over the input, reopened ' + lastApp);
+      }
       return;
     }
     if (/cec/i.test(JSON.stringify(msg))) {
@@ -256,11 +268,8 @@ function watchForeground() {
           asked = Date.now() - fs.statSync(LG_HOME_PASS).mtimeMs < 10000;
           fs.unlinkSync(LG_HOME_PASS);
         } catch (e) { /* no pass: not asked for */ }
-        if (asked) {
-          log('LG home opened on purpose');
-        } else {
-          launchLauncher().then(ok => log('LG home after ' + (previous || 'nothing') + (ok ? ', opened the launcher' : ', could not open the launcher')));
-        }
+        if (asked) log('LG home opened on purpose');
+        else replaceLgHome(previous);
       }
       if (msg.appId) previous = msg.appId;
     }

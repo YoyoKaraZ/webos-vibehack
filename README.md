@@ -180,7 +180,11 @@ HyperHDR's WebSocket, and shows a toast. The launcher's bulb button and inputhoo
 (AI, CH+ and CH- on an LG MR25GA remote.) Switching on saves the state of the lamps, switching
 off restores it, for Philips Hue (CLIP v2) and Nanoleaf; this needs `/home/root/tvhome/hue.json`
 (`bridge`, `key`, `area`) and `nanoleaf.json` (`host`, `token`) on the TV, never in the repo.
-`boot-home.js` re-applies the sync state at boot, since HyperHDR forgets it when it restarts.
+HyperHDR and PicCap only run while the sync is on: `lights.js on` starts them and `off` stops them
+once the lamps are restored (left running, HyperHDR switches its lamps back on by itself whenever a
+picture returns). The sync never starts at boot (`boot-home.js` runs `lights.js apply`, which makes
+sure it is off), and `boot-home.js` switches it off when the TV turns off. Their own autostart
+(Homebrew Channel init.d) must stay disabled.
 The bulb button hides itself when `lights.js` is not installed.
 
 `node lights.js position [chambre|salon]` (the Chambre / Salon button) rewrites HyperHDR's LED

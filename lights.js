@@ -6,6 +6,11 @@
  *
  *   node lights.js toggle | on | off | up | down | apply | status | position [chambre|salon]
  *
+ * HyperHDR and PicCap only run while the sync is on: `on` starts them, `off` stops them once the
+ * lamps are restored. Left running, HyperHDR switches its lamps back on by itself whenever a
+ * picture comes back (screensaver, an HDMI source), even after being told to stop. `apply`, run
+ * at boot, makes sure they are stopped: the sync never starts on its own.
+ *
  * Prints the resulting state as JSON. The state is kept in STATE_FILE; `apply` re-sends it after a
  * reboot. If HyperHDR has an admin password, put it alone in PASSWORD_FILE (never in the repo).
  *
@@ -283,6 +288,38 @@ async function applyPosition(position) {
   }
 }
 
+function luna(uri, params) {
+  return new Promise(resolve => execFile('luna-send', ['-n', '1', uri, JSON.stringify(params || {})],
+    { timeout: 15000 }, (err, out) => { try { resolve(JSON.parse(out)); } catch (e) { resolve({}); } }));
+}
+
+/** True once HyperHDR answers on its port. */
+function hyperhdrUp() {
+  return new Promise(resolve => {
+    const sock = net.connect(PORT, HOST);
+    sock.setTimeout(1000);
+    sock.on('connect', () => { sock.destroy(); resolve(true); });
+    sock.on('error', () => resolve(false));
+    sock.on('timeout', () => { sock.destroy(); resolve(false); });
+  });
+}
+
+/** Starts HyperHDR, waits for it, then starts the screen capture feeding it. */
+async function startServices() {
+  if (!(await hyperhdrUp())) {
+    await luna('luna://org.webosbrew.hyperhdr.loader.service/start');
+    for (let i = 0; i < 40 && !(await hyperhdrUp()); i++) await sleep(500);
+    if (!(await hyperhdrUp())) throw new Error('HyperHDR did not start');
+    await sleep(2000);   // let its instances and LED devices come up
+  }
+  await luna('luna://org.webosbrew.piccap.service/start');
+}
+
+async function stopServices() {
+  await luna('luna://org.webosbrew.piccap.service/stop');
+  await luna('luna://org.webosbrew.hyperhdr.loader.service/terminate');
+}
+
 function toast(message) {
   execFile('luna-send', ['-n', '1', '-a', APP_ID, 'luna://com.webos.notification/createToast',
     JSON.stringify({ sourceId: APP_ID, message: message, noaction: true })], () => {});
@@ -291,39 +328,59 @@ function toast(message) {
 
 async function main(action) {
   const state = load();
-  const wasOn = state.enabled;
   const round = v => Math.round(v * 10) / 10;
-  if (action === 'toggle') state.enabled = !state.enabled;
-  else if (action === 'on') state.enabled = true;
-  else if (action === 'off') state.enabled = false;
-  else if (action === 'up') { state.level = round(Math.min(1, state.level + STEP)); state.enabled = true; }
-  else if (action === 'down') { state.level = round(Math.max(MIN, state.level - STEP)); state.enabled = true; }
-  else if (action === 'position') {
+  if (action === 'status') { console.log(JSON.stringify(state)); return; }
+
+  if (action === 'position') {
     const want = process.argv[3];
-    const next = POSITIONS.indexOf(want) >= 0 ? want
+    state.position = POSITIONS.indexOf(want) >= 0 ? want
       : POSITIONS[(POSITIONS.indexOf(state.position) + 1) % POSITIONS.length];
-    await applyPosition(next);
-    await push(state);   // re-initialising the devices must not switch a paused sync back on
-    state.position = next;
+    if (state.enabled && await hyperhdrUp()) {
+      await applyPosition(state.position);
+      state.applied = state.position;
+      await push(state);   // re-initialising the devices must not switch a paused sync back on
+    }   // otherwise applied when the sync is next switched on
     fs.writeFileSync(STATE_FILE, JSON.stringify(state));
-    toast('Position de la TV : ' + POSITION_LABELS[next]);
+    toast('Position de la TV : ' + POSITION_LABELS[state.position]);
     console.log(JSON.stringify(state));
     return;
   }
-  else if (action !== 'apply' && action !== 'status') throw new Error('unknown action ' + action);
 
-  if (action !== 'status') {
-    // The TV's toast font has no block or bar characters: plain text only.
-    if (!wasOn && state.enabled) await snapshot().catch(e => console.error('snapshot: ' + e.message));
-    await push(state);
-    fs.writeFileSync(STATE_FILE, JSON.stringify(state));
-    if (wasOn && !state.enabled) {
-      await sleep(1500);   // let HyperHDR close the Hue stream before setting the lights
-      await restore().catch(e => console.error('restore: ' + e.message));
+  let want = state.enabled;
+  if (action === 'toggle') want = !state.enabled;
+  else if (action === 'on') want = true;
+  else if (action === 'off' || action === 'apply') want = false;
+  else if (action === 'up') { state.level = round(Math.min(1, state.level + STEP)); want = true; }
+  else if (action === 'down') { state.level = round(Math.max(MIN, state.level - STEP)); want = true; }
+  else throw new Error('unknown action ' + action);
+
+  const running = await hyperhdrUp();
+  if (want) {
+    if (!running || !state.enabled) {
+      // HyperHDR off means the lamps are as the user left them: the state worth restoring later.
+      if (!running) await snapshot().catch(e => console.error('snapshot: ' + e.message));
+      await startServices();
+      if (state.applied !== state.position) {
+        await applyPosition(state.position);
+        state.applied = state.position;
+      }
     }
-    if (action === 'up' || action === 'down') toast('Éclairage : ' + Math.round(state.level * 100) + ' %');
-    else if (action !== 'apply') toast(state.enabled ? "Éclairage d'ambiance activé" : "Éclairage d'ambiance coupé");
+    state.enabled = true;
+    await push(state);
+  } else if (running) {
+    state.enabled = false;
+    await push(state).catch(e => console.error('push: ' + e.message));
+    await sleep(1500);   // let HyperHDR close the Hue stream before setting the lights
+    await restore().catch(e => console.error('restore: ' + e.message));
+    await stopServices();
+  } else {
+    state.enabled = false;
   }
+  fs.writeFileSync(STATE_FILE, JSON.stringify(state));
+
+  // The TV's toast font has no block or bar characters: plain text only.
+  if (action === 'up' || action === 'down') toast('Éclairage : ' + Math.round(state.level * 100) + ' %');
+  else if (action !== 'apply' && (action !== 'off' || running)) toast(state.enabled ? "Éclairage d'ambiance activé" : "Éclairage d'ambiance coupé");
   console.log(JSON.stringify(state));
 }
 
