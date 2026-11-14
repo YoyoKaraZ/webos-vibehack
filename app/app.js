@@ -233,6 +233,7 @@
       it.el.classList.toggle('dock', rowOf(i) === 0);   // the dock has no labels: the top shelf names it
     });
 
+    if (zone === 'grid') placeShadow();
     var band = $('dockBand');
     var n = Math.min(COLUMNS, items.length);
     band.style.display = n ? 'block' : 'none';
@@ -242,14 +243,32 @@
     band.style.height = (TILE_H + 56) + 'px';
   }
 
-  /** Entrance: only the dock and the row under it animate; the rest is off screen anyway. */
+  /**
+   * Entrance: only the dock and the row under it animate; the rest is off screen anyway.
+   *
+   * Coming back, webOS has freed the hidden page's textures and redraws them all, which stalls the
+   * screen for about half a second. The tiles stay hidden meanwhile and the entrance starts once
+   * frames come steadily again, so it plays smoothly instead of freezing halfway.
+   */
+  var entrance = 0;
   function animateIn() {
-    var animated = COLUMNS * 2;
+    var animated = COLUMNS * 2, run = ++entrance;
     items.forEach(function (it, i) {
-      if (i >= animated) { it.el.classList.add('shown'); return; }
-      it.el.classList.remove('shown');
-      setTimeout(function () { it.el.classList.add('shown'); }, 60 + i * 40);
+      if (i < animated) it.el.classList.remove('shown');
+      else it.el.classList.add('shown');
     });
+    var start = performance.now(), last = start, steady = 0;
+    function waitSteady() {
+      if (run !== entrance) return;   // a newer entrance took over
+      var now = performance.now();
+      steady = now - last < 30 ? steady + 1 : 0;
+      last = now;
+      if (steady < 4 && now - start < 1500) { requestAnimationFrame(waitSteady); return; }
+      items.forEach(function (it, i) {
+        if (i < animated) setTimeout(function () { if (run === entrance) it.el.classList.add('shown'); }, i * 40);
+      });
+    }
+    requestAnimationFrame(waitSteady);
   }
 
   /**
@@ -379,6 +398,7 @@
     }
     stage.style.transform = 'translateY(' + (-offset) + 'px)';
 
+    placeShadow();
     if (row === 0) showHero(items[i]);
     else hideHero();
     setAmbient(items[i].color);   // the glow follows the focused tile in every row
@@ -433,6 +453,39 @@
     hero.style.opacity = '0';
   }
 
+  // ---- lift shadow ---------------------------------------------------------------------------
+
+  var shadows = [0, 1].map(function () {
+    var s = document.createElement('div');
+    s.className = 'liftShadow jump';
+    stage.insertBefore(s, tilesEl);   // under the focused tile (z-index 1, later), over the others
+    return s;
+  });
+  var shadowFront = 0, shadowItem = null;
+
+  /** Puts the shadow under the focused tile, or hides it when focus is not in the grid. */
+  function placeShadow() {
+    var item = zone === 'grid' ? items[focused] : null;
+    var front = shadows[shadowFront];
+    if (item && item === shadowItem) {
+      // Same tile, moved (rearranging): the shadow glides with it.
+      front.classList.remove('jump');
+      front.style.left = item.el.style.left;
+      front.style.top = item.el.style.top;
+      return;
+    }
+    front.classList.add('jump');
+    front.classList.remove('on');
+    shadowItem = item;
+    if (!item) return;
+    shadowFront = 1 - shadowFront;
+    var next = shadows[shadowFront];
+    next.classList.add('jump');
+    next.style.left = item.el.style.left;
+    next.style.top = item.el.style.top;
+    next.classList.add('on');
+  }
+
   /** Crossfades the glow to a new colour by swapping between two layers. */
   function setAmbient(color) {
     if (!color) return;
@@ -442,8 +495,13 @@
     var back = ambients[1 - ambientFront];
     back.style.background = 'radial-gradient(circle 1190px at 32% 42%, rgba(' + key + ',0.36) 0%, rgba(' +
       key + ',0.15) 50%, rgba(' + key + ',0) 100%)';
+    back.style.visibility = 'visible';
     back.style.opacity = '1';
-    ambients[ambientFront].style.opacity = '0';
+    var old = ambients[ambientFront];
+    old.style.opacity = '0';
+    clearTimeout(old.hideTimer);
+    clearTimeout(back.hideTimer);
+    old.hideTimer = setTimeout(function () { old.style.visibility = 'hidden'; }, 650);
     ambientFront = 1 - ambientFront;
   }
 
@@ -463,6 +521,7 @@
       if (items[focused]) items[focused].el.classList.remove('focused');
     }
     zone = z;
+    if (z !== 'grid') placeShadow();
   }
 
   /** The pill straight above a dock tile, by horizontal distance. */
@@ -553,6 +612,8 @@
   }
 
   /** Shows theme i (wrapping around); `save` remembers it for the next start. */
+  var BLOB_PX = 128;   // a halo's drawn size; soft enough to stretch tenfold without showing
+
   function applyTheme(i, save) {
     theme = (i + THEMES.length) % THEMES.length;
     var t = THEMES[theme];
@@ -560,15 +621,21 @@
     backdrop.style.background = t.bg || '#000';
     backdrop.innerHTML = '';
     (t.blobs || []).forEach(function (b) {
-      // Drawn at half size and scaled up by the animation: the GPU only moves a small texture,
-      // and on a gradient this soft the difference can't be seen.
-      var el = document.createElement('div');
+      // A small canvas stretched by CSS and the animation: the GPU scales its texture as is. A CSS
+      // gradient was redrawn at the animation's largest scale (about 1250 px per halo), which took
+      // half a second each time the launcher came back, since webOS frees a hidden page's textures.
+      var el = document.createElement('canvas');
       el.className = 'blob';
+      el.width = el.height = BLOB_PX;
+      var g = el.getContext('2d'), r = BLOB_PX / 2;
+      var grad = g.createRadialGradient(r, r, 0, r, r, r);
+      grad.addColorStop(0, 'rgba(' + b.color + ',' + b.alpha + ')');
+      grad.addColorStop(1, 'rgba(' + b.color + ',0)');
+      g.fillStyle = grad;
+      g.fillRect(0, 0, BLOB_PX, BLOB_PX);
       el.style.width = el.style.height = (b.size / 2) + 'px';
       el.style.left = (b.x / 100 * 1920 - b.size / 4) + 'px';
       el.style.top = (b.y / 100 * 1080 - b.size / 4) + 'px';
-      el.style.background = 'radial-gradient(circle closest-side, rgba(' + b.color + ',' + b.alpha + '), rgba(' +
-        b.color + ',0))';
       // Two animations at different rates: the drift moves it, the fade lets colours take over
       // from one another and dark patches open between halos.
       var delay = -(b.offset || 0) + 's';
