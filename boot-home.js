@@ -166,6 +166,38 @@ async function keepAlive() {
   log('boot: keep-alive ' + (ok ? 'added ' : 'could not add ') + missing.join(', '));
 }
 
+/**
+ * The Magic Remote's pointer shows up at the slightest motion of the remote. The remote service
+ * (lginput2) can wake it only on a firm shake instead, but forgets that when it restarts, and
+ * refuses it while the remote is asleep ("Magic Remote is not Ready"). So it is set each time the
+ * remote connects, and at every wake. Set CURSOR_WAKE_UP to '' to leave webOS's behaviour.
+ */
+const CURSOR_WAKE_UP = 'shake';
+async function cursorWakeUp(why) {
+  if (!CURSOR_WAKE_UP) return;
+  const r = await call('luna://com.webos.service.mrcu/cursor/setWakeUpCondition', { condition: CURSOR_WAKE_UP });
+  log(why + ': pointer wakes on ' + CURSOR_WAKE_UP + (r.returnValue ? '' : ' (refused: ' + r.errorText + ')'));
+}
+
+function watchRemote() {
+  if (!CURSOR_WAKE_UP) return;
+  const p = spawn('luna-send', ['-i', 'luna://com.webos.service.mrcu/getConnectionStatus', '{"subscribe":true}']);
+  let buf = '', connected = false;
+  p.stdout.on('data', chunk => {
+    buf += chunk;
+    let nl;
+    while ((nl = buf.indexOf('\n')) >= 0) {
+      const line = buf.slice(0, nl).trim();
+      buf = buf.slice(nl + 1);
+      let msg;
+      try { msg = JSON.parse(line); } catch (e) { continue; }
+      if (msg.connected && !connected) setTimeout(() => cursorWakeUp('remote connected'), 1000);
+      connected = !!msg.connected;
+    }
+  });
+  p.on('close', () => setTimeout(watchRemote, 5000));
+}
+
 /** The light sync never starts on its own: at boot, make sure it is off (see lights.js). */
 const LIGHTS = '/home/root/tvhome/lights.js';
 async function restoreLights() {
@@ -189,6 +221,7 @@ async function replaceLgHome(previous) {
 let busy = false;
 async function poweredOn(why, msg) {
   keepEnergySaving(why);
+  cursorWakeUp(why);
   if (why !== 'boot') stopPreload(why);   // at boot it already ran when the script started
   if (busy) return;
   busy = true;
@@ -249,6 +282,7 @@ function watchPower() {
         stopPreload('boot');
         restoreLights();
         keepAlive();
+        watchRemote();
         if (msg.state === 'Active') poweredOn('boot', msg);
       } else if (state === null) {
         // resubscribed: just pick up the current state
