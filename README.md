@@ -27,6 +27,7 @@ changes:
 | Language | Interface in French, 24-hour clock |
 | Focus | The glass frame that slid between tiles is gone: the focused tile itself lifts, tvOS style (12 % larger, raised, soft shadow, light sheen, a 5° spring tilt toward the direction of travel). Only transform and opacity animate, so it stays smooth on the TV's GPU |
 | Ambient lights | A lights button in the header and the remote's AI, CH+ and CH- keys drive [HyperHDR](https://github.com/awawa-dev/HyperHDR) through [`lights.js`](lights.js): sync on or off and brightness, with a toast. Like Hue Sync, switching off puts the lamps back as they were (Hue and Nanoleaf). See [Ambient lights](#ambient-lights) |
+| Quick inputs | [`inputs/`](inputs/) is a second, tiny app (`com.gathin.tvhome.inputs`): an overlay over whatever is on screen with the plugged-in inputs as cards, in the launcher's style. It shows the last known list at once and refreshes it in the background, so switching source doesn't wait for the full launcher. Bound to a remote key with inputhook |
 | Pointer | webOS shows the Magic Remote pointer on every Home press; the launcher blanks it when it comes back (`webOSSystem.setCursor('blank')`) until the remote really moves |
 | Header | Wi-Fi, settings and lights are icon-only round buttons, so the header fits next to the date |
 | TV position | For a TV on a swivel arm facing one of two rooms: a Chambre / Salon button switches which picture area each lamp follows (left/right and front/back swap), see [Ambient lights](#ambient-lights) |
@@ -177,6 +178,10 @@ HyperHDR's WebSocket, and shows a toast. The launcher's bulb button and inputhoo
 }
 ```
 
+The quick input picker opens from another key (the remote's help key here, code 1124):
+`"1124": {"action": "launch", "id": "com.gathin.tvhome.inputs"}`. Left/right and OK switch
+source; Back or the same key again closes it.
+
 (AI, CH+ and CH- on an LG MR25GA remote.) Switching on saves the state of the lamps, switching
 off restores it, for Philips Hue (CLIP v2) and Nanoleaf; this needs `/home/root/tvhome/hue.json`
 (`bridge`, `key`, `area`) and `nanoleaf.json` (`host`, `token`) on the TV, never in the repo.
@@ -251,6 +256,7 @@ For when you do land on it. Names vary a little by webOS version:
 | File | What it does |
 |---|---|
 | [`app/`](app/) | The launcher: `index.html`, `style.css`, `app.js`, `config.js`, `appinfo.json` |
+| [`inputs/`](inputs/) | The quick input picker, an overlay app installed alongside the launcher |
 | [`install.sh`](install.sh) | Syncs your apps, packages and installs the launcher, and opens it |
 | [`sync-apps.py`](sync-apps.py) | Reads apps, icons and HDMI inputs from the TV into `app/apps.js` and `app/icons/` |
 | [`home-watch.py`](home-watch.py) | Sends the Home button to the launcher |

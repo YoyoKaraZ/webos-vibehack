@@ -1,0 +1,17 @@
+{
+  "id": "com.gathin.tvhome.inputs",
+  "version": "1.0.0",
+  "vendor": "tv-vibehack",
+  "type": "web",
+  "main": "index.html",
+  "title": "Sources",
+  "icon": "icon.png",
+  "visible": false,
+  "transparent": true,
+  "defaultWindowType": "overlay",
+  "noSplashOnLaunch": true,
+  "disableBackHistoryAPI": true,
+  "handlesRelaunch": true,
+  "resolution": "1920x1080",
+  "requiredACG": ["application.launcher"]
+}

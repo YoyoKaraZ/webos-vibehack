@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Sync the TV's apps, package the launcher and install it on an LG TV in Developer Mode.
+# Sync the TV's apps, package the launcher and the quick input picker (inputs/) and install them on
+# an LG TV in Developer Mode.
 #   TV_HOST=192.168.1.50 ./install.sh
 # One-time setup (Developer Mode app open on the TV, Key Server on):
 #   ares-setup-device -a lgtv -i "{'host':'$TV_HOST','port':'9922','username':'prisoner'}"
@@ -12,6 +13,7 @@ cd "$(dirname "$0")"
 : "${TV_HOST:?set TV_HOST to the TV IP address, e.g. TV_HOST=192.168.1.50 $0}"
 DEVICE="${DEVICE:-lgtv}"
 APP_ID=com.gathin.tvhome
+INPUTS_ID=com.gathin.tvhome.inputs
 
 # LG's webOS CLI: use it from PATH, otherwise fetch it with npx.
 ares() {
@@ -28,19 +30,23 @@ if [ ! -f app/icon.png ]; then
   sips -s format png -z 80 80 assets/icon.jpg --out app/icon.png >/dev/null
   sips -s format png -z 130 130 assets/icon.jpg --out app/largeIcon.png >/dev/null
 fi
+[ -f inputs/icon.png ] || cp app/icon.png inputs/icon.png
 
 rm -rf build && mkdir build
 ares package app -o build
+ares package inputs -o build
 if [ -n "${ROOT_SSH:-}" ]; then
-  # What ares does, by hand: hand the package to the TV's installer and wait for its verdict.
-  ssh "$ROOT_SSH" 'cat > /tmp/tvhome.ipk' < build/${APP_ID}_*.ipk
-  ssh "$ROOT_SSH" "
-    luna-send -i luna://com.webos.appInstallService/dev/install \
-      '{\"id\":\"com.ares.defaultName\",\"ipkUrl\":\"/tmp/tvhome.ipk\",\"subscribe\":true}' > /tmp/tvhome.log 2>&1 &
-    for i in \$(seq 60); do grep -qE 'installed|failed' /tmp/tvhome.log && break; sleep 1; done
-    kill \$! 2>/dev/null; rm -f /tmp/tvhome.ipk
-    grep -q '\"installed\"' /tmp/tvhome.log || { cat /tmp/tvhome.log; exit 1; }
-    luna-send -n 1 luna://com.webos.applicationManager/launch '{\"id\":\"$APP_ID\"}' >/dev/null"
+  # What ares does, by hand: hand each package to the TV's installer and wait for its verdict.
+  for ipk in build/${APP_ID}_*.ipk build/${INPUTS_ID}_*.ipk; do
+    ssh "$ROOT_SSH" 'cat > /tmp/tvhome.ipk' < "$ipk"
+    ssh "$ROOT_SSH" "
+      luna-send -i luna://com.webos.appInstallService/dev/install \
+        '{\"id\":\"com.ares.defaultName\",\"ipkUrl\":\"/tmp/tvhome.ipk\",\"subscribe\":true}' > /tmp/tvhome.log 2>&1 &
+      for i in \$(seq 60); do grep -qE 'installed|failed' /tmp/tvhome.log && break; sleep 1; done
+      kill \$! 2>/dev/null; rm -f /tmp/tvhome.ipk
+      grep -q '\"installed\"' /tmp/tvhome.log || { cat /tmp/tvhome.log; exit 1; }"
+  done
+  ssh "$ROOT_SSH" "luna-send -n 1 luna://com.webos.applicationManager/launch '{\"id\":\"$APP_ID\"}' >/dev/null"
 
   # Open the launcher at power-on (see boot-home.js), started at boot by Homebrew Channel. setsid
   # keeps it apart from whatever session starts it.
@@ -53,6 +59,7 @@ if [ -n "${ROOT_SSH:-}" ]; then
   ssh "$ROOT_SSH" "pkill -f '[b]oot-home.js'; /var/lib/webosbrew/init.d/tvhome-boot"
 else
   ares install -d "$DEVICE" build/${APP_ID}_*.ipk
+  ares install -d "$DEVICE" build/${INPUTS_ID}_*.ipk
   ares launch -d "$DEVICE" "$APP_ID"
 fi
 echo "Installed. Hold a number key on the remote while it is open to make it a one-press shortcut."
